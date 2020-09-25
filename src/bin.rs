@@ -1,11 +1,7 @@
-pub mod app;
-pub mod event;
-mod ui;
-mod util;
-
-use self::app::App;
-use self::event::{Config, Event, Events};
 use argh::FromArgs;
+use bazelfe::app::App;
+use bazelfe::event::{Config, Event, Events};
+use bazelfe::ui;
 use std::{error::Error, io, time::Duration};
 use termion::{event::Key, input::MouseTerminal, raw::IntoRawMode, screen::AlternateScreen};
 use tui::{backend::TermionBackend, Terminal};

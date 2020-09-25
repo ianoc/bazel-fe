@@ -151,7 +151,13 @@ impl<'a> App<'a> {
                 tick_rate: 1,
             },
             tasks: StatefulList::with_items(TASKS.to_vec()),
-            action_logs: StatefulList::with_items(ACTION_LOGS.iter().map(|(k,v)| (k.clone(), v.clone(), 0)).chain(ACTION_LOGS.iter().map(|(k,v)| (k.clone(), v.clone(), 0))).collect()),
+            action_logs: StatefulList::with_items(
+                ACTION_LOGS
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone(), 0))
+                    .chain(ACTION_LOGS.iter().map(|(k, v)| (k.clone(), v.clone(), 0)))
+                    .collect(),
+            ),
             logs: StatefulList::with_items(LOGS.to_vec()),
             signals: Signals {
                 sin1: Signal {
@@ -238,7 +244,9 @@ impl<'a> App<'a> {
         self.signals.on_tick();
 
         let (a, b, _) = self.action_logs.items.pop().unwrap();
-        self.action_logs.items.insert(0, (a,b, rand::random::<u16>()));
+        self.action_logs
+            .items
+            .insert(0, (a, b, rand::random::<u16>()));
 
         let log = self.logs.items.pop().unwrap();
         self.logs.items.insert(0, log);
