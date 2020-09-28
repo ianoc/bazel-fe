@@ -27,4 +27,9 @@ path = "src/bin.rs"
 
 [[bin]]
 name = "scala-parser"
-path = "src/scala/scala_parser_app.rs"
+path = "src/source_dependencies/scala/scala_parser_app.rs"
+
+
+[[bin]]
+name = "java-parser"
+path = "src/source_dependencies/java/java_parser_app.rs"
