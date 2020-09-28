@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
-use bazelfe::parse_imports::ParsedFile;
+use bazelfe::scala::parse_imports::ParsedFile;
 #[derive(Clap, Debug)]
 #[clap(name = "basic")]
 struct Opt {
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for import in parsed_file.imports {
             let suffix = match import.suffix {
-                bazelfe::parse_imports::SelectorType::SelectorList(lst) => {
+                bazelfe::scala::parse_imports::SelectorType::SelectorList(lst) => {
                     let arr = lst
                         .iter()
                         .map(|(a, b)| format!("{}=>{}", a, b.as_ref().unwrap_or(a)))
@@ -30,8 +30,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     arr.join(",")
                 }
-                bazelfe::parse_imports::SelectorType::WildcardSelector() => "*".to_string(),
-                bazelfe::parse_imports::SelectorType::NoSelector() => "".to_string(),
+                bazelfe::scala::parse_imports::SelectorType::WildcardSelector() => "*".to_string(),
+                bazelfe::scala::parse_imports::SelectorType::NoSelector() => "".to_string(),
             };
             // println!(
             //     "{}\t{}\t{}",
