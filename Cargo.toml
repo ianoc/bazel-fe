@@ -35,3 +35,9 @@ path = "src/source_dependencies/scala/scala_parser_app.rs"
 [[bin]]
 name = "java-parser"
 path = "src/source_dependencies/java/java_parser_app.rs"
+
+
+
+[[bin]]
+name = "index-table"
+path = "src/index_table/load_index_table_app.rs"

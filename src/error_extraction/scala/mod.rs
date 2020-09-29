@@ -6,4 +6,9 @@ pub struct ClassImportRequest {
     pub priority: u32,
 }
 
-mod object_not_found;
+mod error_is_not_a_member_of_package;
+mod error_object_not_found;
+mod error_symbol_is_missing_from_classpath;
+mod error_symbol_type_missing_from_classpath;
+mod error_type_not_found;
+mod error_value_not_found;

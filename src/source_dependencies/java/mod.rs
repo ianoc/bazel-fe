@@ -1,9 +1,6 @@
 use crate::source_dependencies::parser_helpers::*;
-use crate::source_dependencies::{Error, Import, ParsedFile, Result, SelectorType};
+use crate::source_dependencies::{Import, ParsedFile, Result, SelectorType};
 
-use nom::branch::alt;
-use nom::bytes::complete::{is_a, is_not};
-use nom::bytes::complete::{take_while, take_while1};
 use nom::character::complete::{alphanumeric1, multispace0, space0, space1};
 use nom::combinator::recognize;
 use nom::error::ParseError;
@@ -17,63 +14,6 @@ use nom::{
 
 fn is_valid_import_segment_item(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
-}
-
-fn tuple_extractor<'a, E>() -> impl Fn(&'a str) -> IResult<&str, (&str, Option<&str>), E>
-where
-    E: ParseError<&'a str>,
-{
-    map(
-        tuple((
-            multispace0,
-            alt((
-                take_while1(|chr: char| chr.is_alphanumeric() || chr == '_'),
-                map(
-                    tuple((
-                        tag("`"),
-                        take_while(|chr| chr != '\n' && chr != '\r' && chr != '`'),
-                        tag("`"),
-                    )),
-                    |e| e.1,
-                ),
-            )),
-            multispace0,
-            opt(tuple((
-                tag("=>"),
-                multispace0,
-                take_while1(|chr: char| chr.is_alphanumeric() || chr == '_'),
-            ))),
-            multispace0,
-            opt(tag(",")),
-            multispace0,
-        )),
-        |e| (e.1, e.3.map(|r| r.2)),
-    )
-}
-fn consume_selector<'a, E>() -> impl Fn(&'a str) -> IResult<&str, SelectorType, E>
-where
-    E: ParseError<&'a str>,
-{
-    alt((
-        map(
-            tuple((
-                multispace0,
-                tag("."),
-                multispace0,
-                is_a("{"),
-                many1(map(tuple_extractor(), |s| {
-                    (s.0.to_string(), s.1.map(|e| e.to_string()))
-                })),
-                is_a("}"),
-                multispace0,
-            )),
-            |r| SelectorType::SelectorList(r.4),
-        ),
-        map(tuple((multispace0, tag("._"))), |_| {
-            SelectorType::WildcardSelector()
-        }),
-        map(tuple((space0, is_not("."))), |_| SelectorType::NoSelector()),
-    ))
 }
 
 pub fn parse_import(line_number: u32, input: &str) -> IResult<&str, Import> {

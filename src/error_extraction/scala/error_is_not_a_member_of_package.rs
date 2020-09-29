@@ -3,19 +3,26 @@ use regex::Regex;
 
 use super::ClassImportRequest;
 
+// Example usage:
+// SCALA:
+// package com.example
+// import com.example.foo.bar.Baz
+
 fn build_class_import_request(class_name: String) -> ClassImportRequest {
     ClassImportRequest {
         class_name: class_name,
         exact_only: false,
-        src_fn: "extract_object_not_found",
+        src_fn: "extract_not_a_member_of_package",
         priority: 1,
     }
 }
 
-pub fn extract_object_not_found(input: &str) -> Option<Vec<ClassImportRequest>> {
+pub fn extract_not_a_member_of_package(input: &str) -> Option<Vec<ClassImportRequest>> {
     lazy_static! {
-        static ref RE: Regex =
-            Regex::new(r"^src/[^.]*.scala.*error: not found: object (.*)$").unwrap();
+        static ref RE: Regex = Regex::new(
+            r"^src/[^.]*.scala.*error: \w* (\w*) is not a member of package ([A-Za-z0-9.<>_]+).*$"
+        )
+        .unwrap();
     }
 
     let mut result = None;
@@ -45,27 +52,19 @@ mod tests {
 
     use super::*;
     #[test]
-    fn test_object_not_found_error() {
+    fn test_not_a_member_of_package_error() {
         let sample_output =
-            "src/main/scala/com/example/Example.scala:40: error: not found: object foo
-import foo.bar.baz
-       ^
-src/main/scala/com/example/Example.scala:40: warning: Unused import
-import foo.bar.baz
-               ^
+            "src/main/scala/com/example/Example.scala:2: error: object foo is not a member of package com.example
+import com.example.foo.bar.Baz
+                   ^
+src/main/scala/com/example/Example.scala:2: warning: Unused import
+import com.example.foo.bar.Baz
+                           ^
 one warning found
-one error found
-one warning found
-one error found
-java.lang.RuntimeException: Build failed
-    at io.bazel.rulesscala.scalac.ScalacProcessor.compileScalaSources(ScalacProcessor.java:244)
-    at io.bazel.rulesscala.scalac.ScalacProcessor.processRequest(ScalacProcessor.java:69)
-    at io.bazel.rulesscala.worker.GenericWorker.runPersistentWorker(GenericWorker.java:45)
-    at io.bazel.rulesscala.worker.GenericWorker.run(GenericWorker.java:111)
-    at io.bazel.rulesscala.scalac.ScalaCInvoker.main(ScalaCInvoker.java:41)";
+one error found";
 
         assert_eq!(
-            extract_object_not_found(sample_output),
+            extract_not_a_member_of_package(sample_output),
             Some(vec![build_class_import_request("foo".to_string())])
         );
     }
