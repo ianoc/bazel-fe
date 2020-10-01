@@ -51,9 +51,6 @@ where
 fn parse_file_e(input: &str) -> IResult<&str, Vec<(String, Vec<(u16, String)>)>> {
     many0(map(tuple((parse_index_line(), opt(line_ending))), |e| e.0))(input)
 }
-fn run_parse_index_line(input: &str) -> IResult<&str, (String, Vec<(u16, String)>)> {
-    parse_index_line()(input)
-}
 
 pub fn parse_file(input: &str) -> Result<IndexTable, Box<dyn Error>> {
     let extracted_result: Vec<(String, Vec<(u16, String)>)> = parse_file_e(input).unwrap().1;
@@ -73,6 +70,9 @@ pub fn parse_file(input: &str) -> Result<IndexTable, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn run_parse_index_line(input: &str) -> IResult<&str, (String, Vec<(u16, String)>)> {
+        parse_index_line()(input)
+    }
 
     #[test]
     fn parse_sample_line() {

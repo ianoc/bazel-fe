@@ -101,7 +101,7 @@ where
         .direction(Direction::Vertical)
         .split(chunks[1]);
 
-    let bar_gap = if (sub_chunks[0].width > 50) { 2 } else { 1 };
+    let bar_gap = if sub_chunks[0].width > 50 { 2 } else { 1 };
     let bar_width = (sub_chunks[0].width - bar_gap - 5) / (app.completed_actions.len()) as u16;
     let completed_actions = BarChart::default()
         .block(

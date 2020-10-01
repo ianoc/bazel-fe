@@ -38,7 +38,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (tx, mut rx) = mpsc::channel(32);
 
-    let greeter = BuildEventService { write_channel: tx };
+    let greeter = BuildEventService {
+        write_channel: tx,
+        transform_fn: |e| {
+            let mut buf = vec![];
+            e.encode_length_delimited(&mut buf).unwrap();
+            Some(buf)
+        },
+    };
 
     tokio::spawn(async move {
         let mut file: Option<tokio::fs::File> = None;
@@ -63,9 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     if let Some(ref mut f) = file {
-                        let mut buf = vec![];
-                        msg.encode_length_delimited(&mut buf).unwrap();
-                        let _res = f.write(&buf).await.unwrap();
+                        let _res = f.write(&msg).await.unwrap();
                     }
                 }
             }
