@@ -12,7 +12,7 @@ use bazelfe::protos::*;
 use tokio::prelude::*;
 
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
-
+use google::devtools::build::v1::PublishBuildToolEventStreamRequest;
 use tokio::sync::mpsc;
 
 #[derive(Clap, Debug)]
@@ -20,6 +20,12 @@ use tokio::sync::mpsc;
 struct Opt {
     #[clap(name = "BIND_ADDRESS")]
     bind_address: Option<String>,
+}
+
+fn transform_fn(e: &mut PublishBuildToolEventStreamRequest) -> Option<Vec<u8>> {
+    let mut buf = vec![];
+    e.encode_length_delimited(&mut buf).unwrap();
+    Some(buf)
 }
 
 #[tokio::main]
@@ -40,11 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let greeter = BuildEventService {
         write_channel: tx,
-        transform_fn: |e| {
-            let mut buf = vec![];
-            e.encode_length_delimited(&mut buf).unwrap();
-            Some(buf)
-        },
+        transform_fn: std::sync::Arc::new(transform_fn),
     };
 
     tokio::spawn(async move {

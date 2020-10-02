@@ -1,11 +1,9 @@
 use tonic::{transport::Server, Request, Response, Status};
 
 use crate::protos::*;
-use ::prost::Message;
+
 use futures::{Stream, StreamExt};
 use tokio::prelude::*;
-
-use std::pin::Pin;
 
 use google::devtools::build::v1::publish_build_event_server::{
     PublishBuildEvent, PublishBuildEventServer,
@@ -14,14 +12,42 @@ use google::devtools::build::v1::{
     PublishBuildToolEventStreamRequest, PublishBuildToolEventStreamResponse,
     PublishLifecycleEventRequest,
 };
+use std::pin::Pin;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub mod bazel_event {
-    use crate::protos::*;
+    use super::*;
+    use ::prost::Message;
 
     #[derive(Clone, PartialEq, Debug)]
     pub struct BazelEvent {
         pub event: Evt,
+    }
+    impl BazelEvent {
+        pub fn transform_from(
+            inbound_evt: &mut PublishBuildToolEventStreamRequest,
+        ) -> Option<BazelEvent> {
+            let mut inner_data = inbound_evt
+                .ordered_build_event
+                .take()
+                .as_mut()
+                .and_then(|mut inner| inner.event.take());
+            let _event_time = inner_data.as_mut().and_then(|e| e.event_time.take());
+            let _event = inner_data.and_then(|mut e| e.event.take());
+
+            let decoded_evt = match _event {
+                Some(inner) => match inner {
+                    google::devtools::build::v1::build_event::Event::BazelEvent(e) => {
+                        Evt::BazelEvent(build_event_stream::BuildEvent::decode(&*e.value).unwrap())
+                    }
+                    other => Evt::UnknownEvent(format!("{:?}", other)),
+                },
+                None => Evt::UnknownEvent("Missing Event".to_string()),
+            };
+
+            Some(BazelEvent { event: decoded_evt })
+        }
     }
     #[derive(Clone, PartialEq, Debug)]
     pub enum Evt {
@@ -36,24 +62,35 @@ pub enum BuildEventAction<T> {
     BuildCompleted,
 }
 
-pub struct BuildEventService<F, T>
+pub struct BuildEventService<T>
 where
-    F: Fn(&PublishBuildToolEventStreamRequest) -> Option<T> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
 {
     pub write_channel: mpsc::Sender<BuildEventAction<T>>,
-    pub transform_fn: F,
+    pub transform_fn:
+        Arc<dyn Fn(&mut PublishBuildToolEventStreamRequest) -> Option<T> + Send + Sync>,
 }
 
 fn transform_queue_error_to_status() -> Status {
     Status::resource_exhausted("Exhausted queue when trying to publish message")
 }
 
+pub fn build_bazel_build_events_service() -> (
+    BuildEventService<bazel_event::BazelEvent>,
+    mpsc::Receiver<BuildEventAction<bazel_event::BazelEvent>>,
+) {
+    let (tx, mut rx) = mpsc::channel(256);
+    let server_instance = BuildEventService {
+        write_channel: tx,
+        transform_fn: Arc::new(bazel_event::BazelEvent::transform_from),
+    };
+    (server_instance, rx)
+}
+
 #[tonic::async_trait]
-impl<F, T> PublishBuildEvent for BuildEventService<F, T>
+impl<T> PublishBuildEvent for BuildEventService<T>
 where
-    F: Fn(&PublishBuildToolEventStreamRequest) -> Option<T> + Send + Sync + Clone + 'static,
-    T: Send + Sync + 'static,
+    T: Send + Sync + Clone,
 {
     type PublishBuildToolEventStreamStream = Pin<
         Box<
@@ -70,31 +107,10 @@ where
     ) -> Result<Response<Self::PublishBuildToolEventStreamStream>, Status> {
         let mut stream = request.into_inner();
         let mut cloned_v = self.write_channel.clone();
-        let transform_fn = self.transform_fn.clone();
+        let transform_fn = Arc::clone(&self.transform_fn);
         let output = async_stream::try_stream! {
             while let Some(inbound_evt) = stream.next().await {
                 let mut inbound_evt = inbound_evt?;
-                let transformed_data = (transform_fn)(&inbound_evt);
-
-                let mut inner_data = inbound_evt.ordered_build_event.take().as_mut().and_then (|mut inner| inner.event.take());
-                let _event_time = inner_data.as_mut().and_then(|e| e.event_time.take());
-                let _event = inner_data.and_then(|mut e| e.event.take());
-
-                let decoded_evt = match _event {
-                    Some(inner) => {
-                        match inner {
-                            google::devtools::build::v1::build_event::Event::BazelEvent(e) => {
-                                bazel_event::Evt::BazelEvent(build_event_stream::BuildEvent::decode(&*e.value).unwrap())
-                            },
-                            other => bazel_event::Evt::UnknownEvent(format!("{:?}", other))
-                        }
-                    }
-                        None => bazel_event::Evt::UnknownEvent("Missing Event".to_string())
-                    };
-
-                    let build_event = bazel_event::BazelEvent {
-                        event: decoded_evt
-                    };
 
                 match inbound_evt.ordered_build_event.as_ref() {
                     Some(build_event) => {
@@ -108,6 +124,8 @@ where
             }
                     None => ()
                 };
+                let transformed_data = (transform_fn)(&mut inbound_evt);
+
                 if let Some(r) = transformed_data {
                     cloned_v.send(BuildEventAction::BuildEvent(r)).await.map_err(|_| transform_queue_error_to_status())?;
                 }
@@ -137,13 +155,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::{Buf, Bytes};
+    use ::prost::Message;
 
     use futures::future;
     use futures::future::FutureExt;
     use futures::stream;
     use futures::StreamExt;
-    use google::bytestream::byte_stream_client;
     use pinky_swear::{Pinky, PinkySwear};
     use std::convert::TryFrom;
     use std::io::Read;
@@ -154,9 +171,9 @@ mod tests {
     use tokio::net::UnixStream;
     use tokio::sync::mpsc;
     use tokio::time;
+    use tonic::transport::Server;
     use tonic::transport::{Endpoint, Uri};
     use tonic::Request;
-    use tonic::{transport::Server, Status};
     use tower::service_fn;
 
     fn load_proto(name: &str) -> Vec<PublishBuildToolEventStreamRequest> {
@@ -167,7 +184,7 @@ mod tests {
         let mut file = std::fs::File::open(d).expect("Expected to be able to open input test data");
 
         let mut data_vec = vec![];
-        let mut remaining = file
+        let _ = file
             .read_to_end(&mut data_vec)
             .expect("Expected to read file");
 
@@ -185,7 +202,7 @@ mod tests {
     struct ServerStateHandler {
         _temp_dir_for_uds: tempfile::TempDir,
         completion_pinky: Pinky<()>,
-        pub read_channel: Option<mpsc::Receiver<BuildEventAction>>,
+        pub read_channel: Option<mpsc::Receiver<BuildEventAction<bazel_event::BazelEvent>>>,
     }
     impl Drop for ServerStateHandler {
         fn drop(&mut self) {
@@ -209,9 +226,7 @@ mod tests {
         let path_copy = path.clone();
         println!("Path: {:?}", path);
 
-        let (tx, mut rx) = mpsc::channel(256);
-
-        let server_instance = BuildEventService { write_channel: tx };
+        let (server_instance, mut rx) = build_bazel_build_events_service();
 
         let (promise, completion_pinky) = PinkySwear::<()>::new();
         let server_state = ServerStateHandler {
@@ -259,7 +274,6 @@ mod tests {
     }
 
     #[tokio::test]
-
     async fn test_no_op_build_stream() {
         let event_stream = load_proto("no_op_build.proto");
         let (mut state, mut client) = make_test_server().await;
