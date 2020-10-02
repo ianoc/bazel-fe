@@ -17,7 +17,7 @@ fn build_class_import_request(class_name: String) -> ClassImportRequest {
     }
 }
 
-pub fn extract_not_a_member_of_package(input: &str) -> Option<Vec<ClassImportRequest>> {
+pub fn extract(input: &str) -> Option<Vec<ClassImportRequest>> {
     lazy_static! {
         static ref RE: Regex = Regex::new(
             r"^src/[^.]*.scala.*error: \w* (\w*) is not a member of package ([A-Za-z0-9.<>_]+).*$"
@@ -64,7 +64,7 @@ one warning found
 one error found";
 
         assert_eq!(
-            extract_not_a_member_of_package(sample_output),
+            extract(sample_output),
             Some(vec![build_class_import_request("foo".to_string())])
         );
     }

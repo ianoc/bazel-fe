@@ -17,7 +17,7 @@ fn build_class_import_request(class_name: String) -> ClassImportRequest {
     }
 }
 
-pub fn extract_type_not_found(input: &str) -> Option<Vec<ClassImportRequest>> {
+pub fn extract(input: &str) -> Option<Vec<ClassImportRequest>> {
     lazy_static! {
         static ref RE: Regex =
             Regex::new(r"^src/[^.]*.scala.*error: not found: type (.*)$").unwrap();
@@ -59,7 +59,7 @@ one error found
 one error found";
 
         assert_eq!(
-            extract_type_not_found(sample_output),
+            extract(sample_output),
             Some(vec![build_class_import_request("asdf".to_string())])
         );
     }

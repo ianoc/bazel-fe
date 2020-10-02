@@ -54,7 +54,7 @@ fn build_class_import_request(class_name: String) -> ClassImportRequest {
     }
 }
 
-pub fn extract_symbol_is_missing_from_classpath(input: &str) -> Option<Vec<ClassImportRequest>> {
+pub fn extract(input: &str) -> Option<Vec<ClassImportRequest>> {
     lazy_static! {
         static ref RE: Regex =
             Regex::new(r"^src/[^.]*.scala.*error: Symbol 'type ([A-Za-z0-9.<>_]+)' is missing from the classpath.$").unwrap();
@@ -99,7 +99,7 @@ one error found
 one error found";
 
         assert_eq!(
-            extract_symbol_is_missing_from_classpath(sample_output),
+            extract(sample_output),
             Some(vec![build_class_import_request(
                 "com.example.a.ATrait".to_string()
             )])

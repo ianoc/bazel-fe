@@ -3,7 +3,6 @@ use crate::source_dependencies::{Import, ParsedFile, Result, SelectorType};
 
 use nom::character::complete::{alphanumeric1, multispace0, space0, space1};
 use nom::combinator::recognize;
-use nom::error::ParseError;
 use nom::multi::many1;
 use nom::{
     bytes::complete::tag,

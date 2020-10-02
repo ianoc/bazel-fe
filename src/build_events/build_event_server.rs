@@ -1,13 +1,10 @@
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
 use crate::protos::*;
 
 use futures::{Stream, StreamExt};
-use tokio::prelude::*;
 
-use google::devtools::build::v1::publish_build_event_server::{
-    PublishBuildEvent, PublishBuildEventServer,
-};
+use google::devtools::build::v1::publish_build_event_server::PublishBuildEvent;
 use google::devtools::build::v1::{
     PublishBuildToolEventStreamRequest, PublishBuildToolEventStreamResponse,
     PublishLifecycleEventRequest,
@@ -21,18 +18,18 @@ pub mod bazel_event {
     use ::prost::Message;
 
     #[derive(Clone, PartialEq, Debug)]
-    pub struct BazelEvent {
+    pub struct BazelBuildEvent {
         pub event: Evt,
     }
-    impl BazelEvent {
+    impl BazelBuildEvent {
         pub fn transform_from(
             inbound_evt: &mut PublishBuildToolEventStreamRequest,
-        ) -> Option<BazelEvent> {
+        ) -> Option<BazelBuildEvent> {
             let mut inner_data = inbound_evt
                 .ordered_build_event
                 .take()
                 .as_mut()
-                .and_then(|mut inner| inner.event.take());
+                .and_then(|inner| inner.event.take());
             let _event_time = inner_data.as_mut().and_then(|e| e.event_time.take());
             let _event = inner_data.and_then(|mut e| e.event.take());
 
@@ -46,7 +43,7 @@ pub mod bazel_event {
                 None => Evt::UnknownEvent("Missing Event".to_string()),
             };
 
-            Some(BazelEvent { event: decoded_evt })
+            Some(BazelBuildEvent { event: decoded_evt })
         }
     }
     #[derive(Clone, PartialEq, Debug)]
@@ -76,13 +73,13 @@ fn transform_queue_error_to_status() -> Status {
 }
 
 pub fn build_bazel_build_events_service() -> (
-    BuildEventService<bazel_event::BazelEvent>,
-    mpsc::Receiver<BuildEventAction<bazel_event::BazelEvent>>,
+    BuildEventService<bazel_event::BazelBuildEvent>,
+    mpsc::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
 ) {
-    let (tx, mut rx) = mpsc::channel(256);
+    let (tx, rx) = mpsc::channel(256);
     let server_instance = BuildEventService {
         write_channel: tx,
-        transform_fn: Arc::new(bazel_event::BazelEvent::transform_from),
+        transform_fn: Arc::new(bazel_event::BazelBuildEvent::transform_from),
     };
     (server_instance, rx)
 }
@@ -141,9 +138,9 @@ where
 
     async fn publish_lifecycle_event(
         &self,
-        request: tonic::Request<PublishLifecycleEventRequest>,
+        _request: tonic::Request<PublishLifecycleEventRequest>,
     ) -> Result<tonic::Response<()>, tonic::Status> {
-        let mut cloned_v = self.write_channel.clone();
+        // let mut cloned_v = self.write_channel.clone();
         // cloned_v
         // .send(BuildEventAction::LifecycleEvent(request.into_inner()))
         // .await
@@ -202,7 +199,7 @@ mod tests {
     struct ServerStateHandler {
         _temp_dir_for_uds: tempfile::TempDir,
         completion_pinky: Pinky<()>,
-        pub read_channel: Option<mpsc::Receiver<BuildEventAction<bazel_event::BazelEvent>>>,
+        pub read_channel: Option<mpsc::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>>,
     }
     impl Drop for ServerStateHandler {
         fn drop(&mut self) {
@@ -286,7 +283,7 @@ mod tests {
             .into_inner();
 
         // need to exhaust the stream to ensure we complete the operation
-        ret_v.for_each(|ret_v| future::ready(())).await;
+        ret_v.for_each(|_| future::ready(())).await;
 
         let mut data_stream = vec![];
         let mut channel = state.read_channel.take().unwrap();
@@ -307,10 +304,20 @@ mod tests {
         }
 
         assert_eq!(event_stream.len(), data_stream.len());
+
+        // Some known expected translations/rules and invariants:
+
+        // assert_eq!(data_stream[80],
+        //     BazelEvent{
+        //         event: BazelEvent
+        //     }
+        // )
+        let mut idx = 0;
         for e in data_stream {
-            println!("{:?}", e);
+            println!("{} -> {:?}", idx, e);
+            idx = idx + 1;
         }
-        // assert_eq!(3, 5);
+        assert_eq!(3, 5);
         // assert_eq!(event_stream, data_stream);
     }
 }
