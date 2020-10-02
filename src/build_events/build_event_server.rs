@@ -11,7 +11,7 @@ use google::devtools::build::v1::{
 };
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
 pub mod bazel_event {
     use super::*;
@@ -53,6 +53,7 @@ pub mod bazel_event {
     }
 }
 
+#[derive(Clone, PartialEq, Debug)]
 pub enum BuildEventAction<T> {
     BuildEvent(T),
     LifecycleEvent(PublishLifecycleEventRequest),
@@ -63,7 +64,7 @@ pub struct BuildEventService<T>
 where
     T: Send + Sync + 'static,
 {
-    pub write_channel: mpsc::Sender<BuildEventAction<T>>,
+    pub write_channel: broadcast::Sender<BuildEventAction<T>>,
     pub transform_fn:
         Arc<dyn Fn(&mut PublishBuildToolEventStreamRequest) -> Option<T> + Send + Sync>,
 }
@@ -74,9 +75,9 @@ fn transform_queue_error_to_status() -> Status {
 
 pub fn build_bazel_build_events_service() -> (
     BuildEventService<bazel_event::BazelBuildEvent>,
-    mpsc::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
+    broadcast::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
 ) {
-    let (tx, rx) = mpsc::channel(256);
+    let (tx, rx) = broadcast::channel(256);
     let server_instance = BuildEventService {
         write_channel: tx,
         transform_fn: Arc::new(bazel_event::BazelBuildEvent::transform_from),
@@ -124,10 +125,10 @@ where
                 let transformed_data = (transform_fn)(&mut inbound_evt);
 
                 if let Some(r) = transformed_data {
-                    cloned_v.send(BuildEventAction::BuildEvent(r)).await.map_err(|_| transform_queue_error_to_status())?;
+                    cloned_v.send(BuildEventAction::BuildEvent(r)).map_err(|_| transform_queue_error_to_status())?;
                 }
             }
-            // cloned_v.send(BuildEventAction::BuildCompleted).await.map_err(|e| transform_queue_error_to_status(e))?;
+            cloned_v.send(BuildEventAction::BuildCompleted).map_err(|_| transform_queue_error_to_status())?;
 
         };
 
@@ -138,13 +139,12 @@ where
 
     async fn publish_lifecycle_event(
         &self,
-        _request: tonic::Request<PublishLifecycleEventRequest>,
+        request: tonic::Request<PublishLifecycleEventRequest>,
     ) -> Result<tonic::Response<()>, tonic::Status> {
-        // let mut cloned_v = self.write_channel.clone();
-        // cloned_v
-        // .send(BuildEventAction::LifecycleEvent(request.into_inner()))
-        // .await
-        // .map_err(|e| transform_queue_error_to_status(e))?;
+        let mut cloned_v = self.write_channel.clone();
+        cloned_v
+            .send(BuildEventAction::LifecycleEvent(request.into_inner()))
+            .map_err(|_| transform_queue_error_to_status())?;
         Ok(Response::new(()))
     }
 }
@@ -199,7 +199,8 @@ mod tests {
     struct ServerStateHandler {
         _temp_dir_for_uds: tempfile::TempDir,
         completion_pinky: Pinky<()>,
-        pub read_channel: Option<mpsc::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>>,
+        pub read_channel:
+            Option<broadcast::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>>,
     }
     impl Drop for ServerStateHandler {
         fn drop(&mut self) {
@@ -293,7 +294,7 @@ mod tests {
             drop(state);
         });
 
-        while let Some(action) = channel.recv().await {
+        while let Ok(action) = channel.recv().await {
             match action {
                 BuildEventAction::BuildCompleted => (),
                 BuildEventAction::LifecycleEvent(_) => (),
@@ -307,11 +308,61 @@ mod tests {
 
         // Some known expected translations/rules and invariants:
 
-        // assert_eq!(data_stream[80],
-        //     BazelEvent{
-        //         event: BazelEvent
-        //     }
-        // )
+        {
+            use build_event_id::*;
+            use build_event_stream::*;
+
+            let expected = {
+                // split these out since they block formatting :(
+                let path1 = String::from("file:///private/var/tmp/_bazel_ianoc/82bc06ae5f27fd3635016199b4000165/execroot/com_github_johnynek_bazel_deps/bazel-out/darwin-fastbuild/bin/src/scala/com/github/johnynek/bazel_deps/settings_loader.jar");
+                let label_name =
+                    String::from("//src/scala/com/github/johnynek/bazel_deps:settings_loader");
+                let id_value = String::from(
+                    "f54e660a7cb725ba2ffd16661381d64a939d3960a300b13986455f04fe08ca5f",
+                );
+
+                bazel_event::BazelBuildEvent {
+                    event: bazel_event::Evt::BazelEvent(BuildEvent {
+                        id: Some(BuildEventId {
+                            id: Some(build_event_id::Id::TargetCompleted(TargetCompletedId {
+                                label: label_name,
+                                configuration: Some(ConfigurationId { id: id_value }),
+                                aspect: String::from(""),
+                            })),
+                        }),
+                        children: vec![],
+                        last_message: false,
+                        payload: Some(build_event::Payload::Completed(TargetComplete {
+                            success: true,
+                            target_kind: String::from(""),
+                            test_size: 0,
+                            output_group: vec![OutputGroup {
+                                name: String::from("default"),
+                                file_sets: vec![NamedSetOfFilesId {
+                                    id: String::from("16"),
+                                }],
+                            }],
+                            important_output: vec![File {
+                                path_prefix: vec![
+                                    String::from("bazel-out"),
+                                    String::from("darwin-fastbuild"),
+                                    String::from("bin"),
+                                ],
+                                name: String::from(
+                                    "src/scala/com/github/johnynek/bazel_deps/settings_loader.jar",
+                                ),
+                                file: Some(build_event_stream::file::File::Uri(path1)),
+                            }],
+                            directory_output: vec![],
+                            tag: vec![],
+                            test_timeout_seconds: 0,
+                            failure_detail: None,
+                        })),
+                    }),
+                }
+            };
+            assert_eq!(data_stream[80], expected);
+        }
         let mut idx = 0;
         for e in data_stream {
             println!("{} -> {:?}", idx, e);
