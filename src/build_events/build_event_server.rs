@@ -223,7 +223,7 @@ mod tests {
         let path_copy = path.clone();
         println!("Path: {:?}", path);
 
-        let (server_instance, mut rx) = build_bazel_build_events_service();
+        let (server_instance, rx) = build_bazel_build_events_service();
 
         let (promise, completion_pinky) = PinkySwear::<()>::new();
         let server_state = ServerStateHandler {
@@ -317,7 +317,7 @@ mod tests {
             println!("{} -> {:?}", idx, e);
             idx = idx + 1;
         }
-        assert_eq!(3, 5);
+        // assert_eq!(3, 5);
         // assert_eq!(event_stream, data_stream);
     }
 }
