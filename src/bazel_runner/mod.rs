@@ -1,5 +1,5 @@
+use std::ffi::OsString;
 use std::process::Stdio;
-use std::{collections::HashMap, collections::HashSet, ffi::OsString};
 use tokio::io::AsyncReadExt;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -61,7 +61,6 @@ pub struct ExecuteResult {
 pub async fn execute_bazel<S: Into<String> + Clone>(
     command: Vec<S>,
     bes_port: u16,
-    _previous_additions: HashMap<String, HashSet<String>>,
 ) -> ExecuteResult {
     let application: OsString = command
         .first()

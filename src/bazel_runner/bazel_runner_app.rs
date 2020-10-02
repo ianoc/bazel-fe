@@ -3,10 +3,11 @@ extern crate log;
 
 use clap::{AppSettings, Clap};
 
-use std::{collections::HashMap, env};
+use std::env;
 use tonic::transport::Server;
 
 use ::prost::Message;
+use bazelfe::build_events::build_event_server::bazel_event;
 use bazelfe::build_events::build_event_server::{BuildEventAction, BuildEventService};
 use bazelfe::protos::*;
 use tokio::prelude::*;
@@ -25,13 +26,6 @@ struct Opt {
 
     #[clap(required = true, min_values = 1)]
     passthrough_args: Vec<String>,
-}
-
-fn transform_fn(e: &mut PublishBuildToolEventStreamRequest) -> Option<Vec<u8>> {
-    let mut buf = vec![];
-    e.encode_length_delimited(&mut buf).unwrap();
-    // println!("{:?}", e);
-    Some(buf)
 }
 
 #[tokio::main]
@@ -54,39 +48,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Services listening on {}", addr);
 
-    let (tx, mut rx) = broadcast::channel(32);
-
-    let bes = BuildEventService {
-        write_channel: tx,
-        transform_fn: std::sync::Arc::new(transform_fn),
-    };
+    let (bes, mut rx) =
+        bazelfe::build_events::build_event_server::build_bazel_build_events_service();
 
     tokio::spawn(async move {
-        let mut file: Option<tokio::fs::File> = None;
-        let mut idx: u32 = 0;
         while let Ok(action) = rx.recv().await {
             match action {
-                BuildEventAction::BuildCompleted => {
-                    let _ = file.take();
-                    ()
-                }
+                BuildEventAction::BuildCompleted => (),
                 BuildEventAction::LifecycleEvent(_) => (),
-                BuildEventAction::BuildEvent(msg) => {
-                    match file {
-                        None => {
-                            idx = idx + 1;
-                            let f = tokio::fs::File::create(format!("build_events_{}.proto", idx))
-                                .await
-                                .unwrap();
-                            file = Some(f);
-                        }
-                        Some(_) => (),
-                    };
 
-                    if let Some(ref mut f) = file {
-                        let _res = f.write(&msg).await.unwrap();
+                BuildEventAction::BuildEvent(msg) => match msg.event {
+                    bazel_event::Evt::BazelEvent(_) => println!("Other message"),
+                    bazel_event::Evt::TargetConfigured(a, b) => {
+                        println!("Label: {:?}, other: {:?}", a, b)
                     }
-                }
+                    bazel_event::Evt::ActionCompleted(ace) => println!("Test failure: {:?}", ace),
+                    bazel_event::Evt::TestFailure(tfe) => println!("Test failure: {:?}", tfe),
+                    bazel_event::Evt::UnknownEvent(String) => (),
+                },
             }
         }
     });
@@ -102,9 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Service is up.");
     });
 
-    let res = bazel_runner::execute_bazel(opt.passthrough_args, bes_port, HashMap::new()).await;
+    let res = bazel_runner::execute_bazel(opt.passthrough_args, bes_port).await;
     println!("{:?}", res);
-    // service_fut.await?;
 
     Ok(())
 }

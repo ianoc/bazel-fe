@@ -36,7 +36,103 @@ pub mod bazel_event {
             let decoded_evt = match _event {
                 Some(inner) => match inner {
                     google::devtools::build::v1::build_event::Event::BazelEvent(e) => {
-                        Evt::BazelEvent(build_event_stream::BuildEvent::decode(&*e.value).unwrap())
+                        let v = build_event_stream::BuildEvent::decode(&*e.value).unwrap();
+
+                        let target_configured_evt: Option<(String, String)> = {
+                            let target_kind_opt = v.payload.as_ref().and_then(|e| match e {
+                                build_event_stream::build_event::Payload::Configured(cfg) => {
+                                    Some(cfg.target_kind.replace(" rule", ""))
+                                }
+                                _ => None,
+                            });
+                            let target_label_opt = v
+                                .id
+                                .as_ref()
+                                .and_then(|e| e.id.as_ref())
+                                .and_then(|e| match e {
+                                    build_event_stream::build_event_id::Id::TargetConfigured(
+                                        target_configured_id,
+                                    ) => Some(target_configured_id.label.clone()),
+                                    _ => None,
+                                });
+
+                            target_kind_opt.and_then(|e| target_label_opt.map(|u| (e, u)))
+                        };
+
+                        let error_info: Option<Evt> = {
+                            let label_name_opt = v.payload.as_ref().and_then(|e| match e {
+                                build_event_stream::build_event::Payload::Action(cfg) => {
+                                    let stdout_f = cfg.stdout.as_ref().and_then(|e| e.file.clone());
+                                    let stderr_f = cfg.stderr.as_ref().and_then(|e| e.file.clone());
+                                    Some((cfg.success, stdout_f, stderr_f))
+                                }
+                                _ => None,
+                            });
+                            let target_label_opt =
+                                v.id.as_ref()
+                                    .and_then(|e| e.id.as_ref())
+                                    .and_then(|e| match e {
+                                        build_event_stream::build_event_id::Id::ActionCompleted(
+                                            action_completed_id,
+                                        ) => Some(action_completed_id.label.clone()),
+                                        _ => None,
+                                    });
+
+                            label_name_opt.and_then(|(success, stdout, stderr)| {
+                                target_label_opt.map(|u| {
+                                    Evt::ActionCompleted(ActionCompletedEvt {
+                                        success: success,
+                                        label: u,
+                                        stdout: stdout,
+                                        stderr: stderr,
+                                    })
+                                })
+                            })
+                        };
+
+                        let test_outputs: Option<Evt> = {
+                            let failed_file_data: Option<Vec<build_event_stream::file::File>> =
+                                v.payload.as_ref().and_then(|e| match e {
+                                    build_event_stream::build_event::Payload::TestSummary(cfg) => {
+                                        Some(
+                                            cfg.failed
+                                                .iter()
+                                                .flat_map(|e| e.file.clone().into_iter())
+                                                .collect(),
+                                        )
+                                    }
+                                    _ => None,
+                                });
+
+                            let target_label_opt =
+                                v.id.as_ref()
+                                    .and_then(|e| e.id.as_ref())
+                                    .and_then(|e| match e {
+                                        build_event_stream::build_event_id::Id::TestSummary(
+                                            test_summary_id,
+                                        ) => Some(test_summary_id.label.clone()),
+                                        _ => None,
+                                    });
+
+                            failed_file_data.and_then(|failed_files| {
+                                target_label_opt.map(|u| {
+                                    Evt::TestFailure(TestFailureEvt {
+                                        label: u,
+                                        failed_files: failed_files,
+                                    })
+                                })
+                            })
+                        };
+
+                        if let Some((a, b)) = target_configured_evt {
+                            Evt::TargetConfigured(a, b)
+                        } else if let Some(e) = error_info {
+                            e
+                        } else if let Some(e) = test_outputs {
+                            e
+                        } else {
+                            Evt::BazelEvent(v)
+                        }
                     }
                     other => Evt::UnknownEvent(format!("{:?}", other)),
                 },
@@ -47,8 +143,23 @@ pub mod bazel_event {
         }
     }
     #[derive(Clone, PartialEq, Debug)]
+    pub struct ActionCompletedEvt {
+        pub success: bool,
+        pub label: String,
+        pub stdout: Option<build_event_stream::file::File>,
+        pub stderr: Option<build_event_stream::file::File>,
+    }
+    #[derive(Clone, PartialEq, Debug)]
+    pub struct TestFailureEvt {
+        pub label: String,
+        pub failed_files: Vec<build_event_stream::file::File>,
+    }
+    #[derive(Clone, PartialEq, Debug)]
     pub enum Evt {
         BazelEvent(build_event_stream::BuildEvent),
+        TargetConfigured(String, String),
+        ActionCompleted(ActionCompletedEvt),
+        TestFailure(TestFailureEvt),
         UnknownEvent(String),
     }
 }
