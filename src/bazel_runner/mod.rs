@@ -1,143 +1,127 @@
-// use nom::bytes::complete::take_while1;
-// use nom::character::complete::digit1;
-// use nom::character::complete::line_ending;
-// use nom::error::ParseError;
-// use nom::multi::{many0, many1};
-// use nom::{bytes::complete::tag, combinator::map, combinator::opt, sequence::tuple, IResult};
-// use std::{collections::HashMap, collections::HashSet, error::Error, process::Command};
+use std::process::Stdio;
+use std::{collections::HashMap, collections::HashSet, ffi::OsString};
+use tokio::io::AsyncReadExt;
+use tokio::io::{self, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 
-// pub struct IndexTable {
-//     tbl_map: HashMap<String, Vec<(u16, String)>>,
-// }
-// impl IndexTable {
-//     pub fn get<S>(&self, key: S) -> Option<&Vec<(u16, String)>>
-//     where
-//         S: Into<String>,
-//     {
-//         self.tbl_map.get(&key.into())
-//     }
-// }
-// fn element_extractor<'a, E>() -> impl Fn(&'a str) -> IResult<&str, (u16, &str), E>
-// where
-//     E: ParseError<&'a str>,
-// {
-//     map(
-//         tuple((
-//             digit1,
-//             tag(":"),
-//             take_while1(|chr| chr != ',' && chr != '\r' && chr != '\n'),
-//         )),
-//         |(freq, _, target)| {
-//             let f: &str = freq;
-//             (f.parse::<u16>().unwrap(), target)
-//         },
-//     )
-// }
+fn update_command<S: Into<String> + Clone>(
+    command: &Vec<S>,
+    srv_port: u16,
+) -> Option<Vec<OsString>> {
+    let lst_str: Vec<String> = command.iter().skip(1).map(|e| e.clone().into()).collect();
 
-// fn parse_index_line<'a, E>() -> impl Fn(&'a str) -> IResult<&str, (String, Vec<(u16, String)>), E>
-// where
-//     E: ParseError<&'a str>,
-// {
-//     map(
-//         tuple((
-//             map(take_while1(|chr| chr != '\t'), |e: &str| e.to_string()),
-//             tag("\t"),
-//             many1(map(element_extractor(), |(freq, v)| (freq, v.to_string()))),
-//         )),
-//         |tup| (tup.0, tup.2),
-//     )
-// }
+    let mut idx = 0;
+    let mut do_continue = true;
+    while idx < lst_str.len() && do_continue {
+        if !lst_str[idx].starts_with("--") {
+            do_continue = false
+        } else {
+            idx += 1
+        }
+    }
 
-// fn parse_file_e(input: &str) -> IResult<&str, Vec<(String, Vec<(u16, String)>)>> {
-//     many0(map(tuple((parse_index_line(), opt(line_ending))), |e| e.0))(input)
-// }
-// fn run_parse_index_line(input: &str) -> IResult<&str, (String, Vec<(u16, String)>)> {
-//     parse_index_line()(input)
-// }
+    if do_continue == true {
+        return None;
+    }
 
-// fn update_command(command: Vec<&str>) -> Vec<String> {
-//     unimplemented!()
-// }
+    let command_element: &str = &lst_str[idx].to_lowercase();
 
-// pub struct ExecuteResult {
-//     pub exit_code: i32,
-//     pub errors_corrected: u32,
-// }
-// pub fn execute_bazel(
-//     mut command: Vec<&str>,
-//     _previous_additions: HashMap<String, HashSet<String>>,
-// ) -> ExecuteResult {
-//     let application = command
-//         .pop()
-//         .expect("Should have had at least one arg the bazel process itself.");
-//     let updated_command = update_command(command);
+    match command_element {
+        "build" => (),
+        "test" => (),
+        _ => return None,
+    };
 
-//     let mut child = Command::new(application)
-//         .args(&updated_command)
-//         .spawn()
-//         .expect("failed to execute child");
+    let (pre_cmd, cmd_including_post) = lst_str.split_at(idx);
+    let (cmd, post_command) = cmd_including_post.split_at(1);
 
-//     child.wait();
-//     unimplemented!()
-// }
+    let bes_section = vec![
+        cmd[0].clone(),
+        String::from("--build_event_publish_all_actions"),
+        String::from("--bes_upload_mode=fully_async"),
+        String::from("--bes_backend"),
+        String::from(format!("grpc://127.0.0.1:{}", srv_port)),
+    ];
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+    Some(
+        vec![pre_cmd.iter(), bes_section.iter(), post_command.iter()]
+            .into_iter()
+            .flat_map(|e| e)
+            .map(|e| e.into())
+            .collect(),
+    )
+}
 
-//     #[test]
-//     fn parse_sample_line() {
-//         assert_eq!(
-//             run_parse_index_line(
-//                 "PantsWorkaroundCache\t0:@third_party_jvm//3rdparty/jvm/com/twitter:util_cache"
-//             )
-//             .unwrap()
-//             .1,
-//             (
-//                 String::from("PantsWorkaroundCache"),
-//                 vec![(
-//                     0,
-//                     String::from("@third_party_jvm//3rdparty/jvm/com/twitter:util_cache")
-//                 )]
-//             )
-//         );
-//     }
+#[derive(Clone, PartialEq, Debug)]
+pub struct ExecuteResult {
+    pub exit_code: i32,
+    pub errors_corrected: u32,
+}
+pub async fn execute_bazel<S: Into<String> + Clone>(
+    command: Vec<S>,
+    bes_port: u16,
+    _previous_additions: HashMap<String, HashSet<String>>,
+) -> ExecuteResult {
+    let application: OsString = command
+        .first()
+        .map(|a| {
+            let a: String = a.clone().into();
+            a
+        })
+        .expect("Should have had at least one arg the bazel process itself.")
+        .into();
 
-//     #[test]
-//     fn parse_multiple_lines() {
-//         let parsed_file = parse_file(
-//             "scala.reflect.internal.SymbolPairs.Cursor.anon.1\t1:@third_party_jvm//3rdparty/jvm/org/scala_lang:scala_reflect
-// org.apache.parquet.thrift.test.TestPerson.TestPersonTupleScheme\t0:@third_party_jvm//3rdparty/jvm/org/apache/parquet:parquet_thrift_jar_tests
-// org.apache.commons.lang3.concurrent.MultiBackgroundInitializer\t68:@third_party_jvm//3rdparty/jvm/org/apache/commons:commons_lang3
-// org.apache.hadoop.util.GcTimeMonitor\t38:@third_party_jvm//3rdparty/jvm/org/apache/hadoop:hadoop_common
-// org.apache.hadoop.fs.FSProtos.FileStatusProto.FileType\t38:@third_party_jvm//3rdparty/jvm/org/apache/hadoop:hadoop_common
-// com.twitter.chill.JavaIterableWrapperSerializer\t2:@third_party_jvm//3rdparty/jvm/com/twitter:chill
-// org.apache.commons.collections4.map.ListOrderedMap$EntrySetView\t0:@third_party_jvm//3rdparty/jvm/org/apache/commons:commons_collections4
-// scala.collection.convert.AsJavaConverters\t41:@third_party_jvm//3rdparty/jvm/org/scala_lang:scala_library
-// org.ehcache.xml.XmlConfiguration.1\t0:@third_party_jvm//3rdparty/jvm/org/ehcache:ehcache
-// com.goindex.proto.api.fender.AdminService.LoadAdminReaderRequestOrBuilder\t6://src/main/proto/com/stripe/terminal/terminal/pub/api/fender:admin_service_java_proto
-// com.ibm.icu.text.CharsetRecog_sbcs$CharsetRecog_8859_1_de\t1:@third_party_jvm//3rdparty/jvm/com/ibm/icu:icu4j
-// scala.reflect.internal.Definitions$DefinitionsClass$VarArityClass\t1:@third_party_jvm//3rdparty/jvm/org/scala_lang:scala_reflect
-// org.apache.http.nio.pool.AbstractNIOConnPool.1\t0:@third_party_jvm//3rdparty/jvm/org/apache/httpcomponents:httpcore_nio
-// io.circe.generic.util.macros.DerivationMacros$$typecreator1$1 21:@third_party_jvm//3rdparty/jvm/io/circe:circe_generic
-// org.apache.zookeeper.server.NettyServerCnxn.DumpCommand\t0:@third_party_jvm//3rdparty/jvm/org/apache/zookeeper:zookeeper
-// org.apache.logging.log4j.core.appender.OutputStreamAppender$OutputStreamManagerFactory\t53:@third_party_jvm//3rdparty/jvm/org/apache/logging/log4j:log4j_core
-// com.twitter.finagle.http.service.RoutingService.anonfun\t2:@third_party_jvm//3rdparty/jvm/com/twitter:finagle_http
-// org.bouncycastle.util.CollectionStor\t10:@third_party_jvm//3rdparty/jvm/org/bouncycastle:bcprov_jdk15on
-// org.apache.avro.io.parsing.JsonGrammarGenerator$1\t0:@third_party_jvm//3rdparty/jvm/org/apache/avro:avro
-// org.terracotta.statistics.util\t0:@third_party_jvm//3rdparty/jvm/org/ehcache:ehcache
-// com.ibm.icu.impl.Normalizer2Impl$1\t1:@third_party_jvm//3rdparty/jvm/com/ibm/icu:icu4j
-// org.eclipse.jetty.io.ByteBufferPool.Bucket\t0:@third_party_jvm//3rdparty/jvm/org/eclipse"
-//         ).unwrap();
+    let updated_command = match update_command(&command, bes_port) {
+        Some(e) => e,
+        None => command
+            .iter()
+            .skip(1)
+            .map(|str_ref| {
+                let a: String = str_ref.clone().into();
+                let a: OsString = a.into();
+                a
+            })
+            .collect(),
+    };
 
-//         assert_eq!(
-//             parsed_file.get("org.apache.parquet.thrift.test.TestPerson.TestPersonTupleScheme"),
-//             Some(&vec![(
-//                 0,
-//                 String::from(
-//                     "@third_party_jvm//3rdparty/jvm/org/apache/parquet:parquet_thrift_jar_tests"
-//                 )
-//             )])
-//         );
-//     }
-// }
+    println!("{:?} {:?}", application, updated_command);
+    let mut cmd = Command::new(application);
+
+    cmd.args(&updated_command)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("failed to start bazel process");
+
+    let mut child_stdout = child.stdout.take().expect("Child didn't have a stdout");
+
+    tokio::spawn(async move {
+        let mut bytes_read = 1;
+        let mut buffer = [0; 1024];
+        let mut stdout = tokio::io::stdout();
+        while bytes_read > 0 {
+            bytes_read = child_stdout.read(&mut buffer[..]).await.unwrap();
+            stdout.write_all(&buffer[0..bytes_read]).await.unwrap()
+        }
+    });
+
+    let mut child_stderr = child.stderr.take().expect("Child didn't have a stderr");
+
+    tokio::spawn(async move {
+        let mut bytes_read = 1;
+        let mut buffer = [0; 1024];
+        let mut stderr = tokio::io::stderr();
+        while bytes_read > 0 {
+            bytes_read = child_stderr.read(&mut buffer[..]).await.unwrap();
+            stderr.write_all(&buffer[0..bytes_read]).await.unwrap()
+        }
+    });
+
+    let result = child.await.expect("The command wasn't running");
+
+    ExecuteResult {
+        exit_code: result.code().unwrap_or_else(|| -1),
+        errors_corrected: 0,
+    }
+}
