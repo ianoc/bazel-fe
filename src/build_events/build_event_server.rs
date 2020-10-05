@@ -38,7 +38,7 @@ pub mod bazel_event {
                     google::devtools::build::v1::build_event::Event::BazelEvent(e) => {
                         let v = build_event_stream::BuildEvent::decode(&*e.value).unwrap();
 
-                        let target_configured_evt: Option<(String, String)> = {
+                        let target_configured_evt: Option<TargetConfiguredEvt> = {
                             let target_kind_opt = v.payload.as_ref().and_then(|e| match e {
                                 build_event_stream::build_event::Payload::Configured(cfg) => {
                                     Some(cfg.target_kind.replace(" rule", ""))
@@ -56,7 +56,12 @@ pub mod bazel_event {
                                     _ => None,
                                 });
 
-                            target_kind_opt.and_then(|e| target_label_opt.map(|u| (e, u)))
+                            target_kind_opt.and_then(|e| {
+                                target_label_opt.map(|u| TargetConfiguredEvt {
+                                    rule_kind: e,
+                                    label: u,
+                                })
+                            })
                         };
 
                         let error_info: Option<Evt> = {
@@ -124,8 +129,8 @@ pub mod bazel_event {
                             })
                         };
 
-                        if let Some((a, b)) = target_configured_evt {
-                            Evt::TargetConfigured(a, b)
+                        if let Some(e) = target_configured_evt {
+                            Evt::TargetConfigured(e)
                         } else if let Some(e) = error_info {
                             e
                         } else if let Some(e) = test_outputs {
@@ -155,9 +160,15 @@ pub mod bazel_event {
         pub failed_files: Vec<build_event_stream::file::File>,
     }
     #[derive(Clone, PartialEq, Debug)]
+
+    pub struct TargetConfiguredEvt {
+        pub label: String,
+        pub rule_kind: String,
+    }
+    #[derive(Clone, PartialEq, Debug)]
     pub enum Evt {
         BazelEvent(build_event_stream::BuildEvent),
-        TargetConfigured(String, String),
+        TargetConfigured(TargetConfiguredEvt),
         ActionCompleted(ActionCompletedEvt),
         TestFailure(TestFailureEvt),
         UnknownEvent(String),

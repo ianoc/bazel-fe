@@ -2,6 +2,7 @@
 extern crate log;
 
 use clap::{AppSettings, Clap};
+use std::collections::HashMap;
 
 use std::env;
 use tonic::transport::Server;
@@ -17,6 +18,16 @@ use google::devtools::build::v1::publish_build_event_server::PublishBuildEventSe
 use google::devtools::build::v1::PublishBuildToolEventStreamRequest;
 use rand::Rng;
 use tokio::sync::broadcast;
+#[derive(Debug)]
+struct TargetData {
+    pub rule_kind: Option<String>,
+}
+#[derive(Debug)]
+struct ErrorInfo {
+    pub label: String,
+    pub output_files: Vec<build_event_stream::file::File>,
+    pub target_kind: Option<String>,
+}
 
 #[derive(Clap, Debug)]
 #[clap(name = "basic", setting = AppSettings::TrailingVarArg)]
@@ -52,19 +63,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bazelfe::build_events::build_event_server::build_bazel_build_events_service();
 
     tokio::spawn(async move {
+        let mut rule_kind_lookup = HashMap::new();
         while let Ok(action) = rx.recv().await {
             match action {
-                BuildEventAction::BuildCompleted => (),
+                BuildEventAction::BuildCompleted => {
+                    rule_kind_lookup.clear();
+                }
                 BuildEventAction::LifecycleEvent(_) => (),
-
                 BuildEventAction::BuildEvent(msg) => match msg.event {
-                    bazel_event::Evt::BazelEvent(_) => println!("Other message"),
-                    bazel_event::Evt::TargetConfigured(a, b) => {
-                        println!("Label: {:?}, other: {:?}", a, b)
+                    bazel_event::Evt::BazelEvent(_) => (),
+                    bazel_event::Evt::TargetConfigured(tgt_cfg) => {
+                        println!("targetCfg evt: {:?}", tgt_cfg);
+                        rule_kind_lookup.insert(tgt_cfg.label, tgt_cfg.rule_kind);
                     }
-                    bazel_event::Evt::ActionCompleted(ace) => println!("Test failure: {:?}", ace),
-                    bazel_event::Evt::TestFailure(tfe) => println!("Test failure: {:?}", tfe),
-                    bazel_event::Evt::UnknownEvent(String) => (),
+                    bazel_event::Evt::ActionCompleted(ace) => {
+                        if !ace.success {
+                            let err_info = ErrorInfo {
+                                output_files: ace
+                                    .stdout
+                                    .into_iter()
+                                    .chain(ace.stderr.into_iter())
+                                    .collect(),
+                                target_kind: rule_kind_lookup.get(&ace.label).map(|e| e.clone()),
+                                label: ace.label,
+                            };
+                            println!("Action failed error info: {:?}", err_info);
+                        }
+                    }
+                    bazel_event::Evt::TestFailure(tfe) => {
+                        println!("Test failure: {:?}", tfe);
+                        let err_info = ErrorInfo {
+                            output_files: tfe.failed_files,
+                            target_kind: rule_kind_lookup.get(&tfe.label).map(|e| e.clone()),
+                            label: tfe.label,
+                        };
+                        println!("Error Info: {:?}", err_info);
+                    }
+                    bazel_event::Evt::UnknownEvent(_) => (),
                 },
             }
         }
