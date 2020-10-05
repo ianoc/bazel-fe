@@ -2,33 +2,21 @@
 extern crate log;
 
 use clap::{AppSettings, Clap};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use std::env;
 use tonic::transport::Server;
 
-use ::prost::Message;
-use bazelfe::build_events::build_event_server::bazel_event;
-use bazelfe::build_events::build_event_server::{BuildEventAction, BuildEventService};
 use bazelfe::protos::*;
 use tokio::prelude::*;
 
 use bazelfe::bazel_runner;
+use bazelfe::build_events::error_type_extractor::ErrorInfo;
+use bazelfe::error_extraction::scala::stream_operator::ExtractClassData;
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
 use google::devtools::build::v1::PublishBuildToolEventStreamRequest;
 use rand::Rng;
 use tokio::sync::broadcast;
-#[derive(Debug)]
-struct TargetData {
-    pub rule_kind: Option<String>,
-}
-#[derive(Debug)]
-struct ErrorInfo {
-    pub label: String,
-    pub output_files: Vec<build_event_stream::file::File>,
-    pub target_kind: Option<String>,
-}
-
 #[derive(Clap, Debug)]
 #[clap(name = "basic", setting = AppSettings::TrailingVarArg)]
 struct Opt {
@@ -39,10 +27,39 @@ struct Opt {
     passthrough_args: Vec<String>,
 }
 
+struct CustError(ErrorInfo);
+impl From<ErrorInfo> for CustError {
+    fn from(ei: ErrorInfo) -> Self {
+        Self(ei)
+    }
+}
+impl ExtractClassData<String> for CustError {
+    fn paths(&self) -> Vec<std::path::PathBuf> {
+        self.0
+            .output_files
+            .iter()
+            .flat_map(|e| match e {
+                build_event_stream::file::File::Uri(e) => {
+                    let u: PathBuf = e.strip_prefix("file://").unwrap().into();
+                    println!("Path...: {:?}", u);
+                    Some(u)
+                }
+                build_event_stream::file::File::Contents(_) => None,
+            })
+            .collect()
+    }
+
+    fn id_info(&self) -> String {
+        self.0.label.clone()
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = Opt::parse();
     let mut rng = rand::thread_rng();
+
+    bazel_runner::register_ctrlc_handler();
 
     let default_port = {
         let rand_v: u16 = rng.gen();
@@ -57,50 +74,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .expect("can't parse BIND_ADDRESS variable");
 
+    let passthrough_args = opt.passthrough_args.clone();
     info!("Services listening on {}", addr);
 
-    let (bes, mut rx) =
+    let (bes, sender_arc, mut rx) =
         bazelfe::build_events::build_event_server::build_bazel_build_events_service();
 
-    tokio::spawn(async move {
-        let mut rule_kind_lookup = HashMap::new();
-        while let Ok(action) = rx.recv().await {
+    let mut error_stream = ErrorInfo::build_transformer(rx);
+
+    let mut target_extracted_stream =
+        bazelfe::error_extraction::scala::stream_operator::build_transformer::<
+            ErrorInfo,
+            String,
+            CustError,
+        >(error_stream);
+
+    let recv_task = tokio::spawn(async move {
+        while let Some(action) = target_extracted_stream.recv().await {
             match action {
-                BuildEventAction::BuildCompleted => {
-                    rule_kind_lookup.clear();
+                None => println!("Build completed"),
+                Some(err_info) => {
+                    println!("Error info: {:?}", err_info);
                 }
-                BuildEventAction::LifecycleEvent(_) => (),
-                BuildEventAction::BuildEvent(msg) => match msg.event {
-                    bazel_event::Evt::BazelEvent(_) => (),
-                    bazel_event::Evt::TargetConfigured(tgt_cfg) => {
-                        println!("targetCfg evt: {:?}", tgt_cfg);
-                        rule_kind_lookup.insert(tgt_cfg.label, tgt_cfg.rule_kind);
-                    }
-                    bazel_event::Evt::ActionCompleted(ace) => {
-                        if !ace.success {
-                            let err_info = ErrorInfo {
-                                output_files: ace
-                                    .stdout
-                                    .into_iter()
-                                    .chain(ace.stderr.into_iter())
-                                    .collect(),
-                                target_kind: rule_kind_lookup.get(&ace.label).map(|e| e.clone()),
-                                label: ace.label,
-                            };
-                            println!("Action failed error info: {:?}", err_info);
-                        }
-                    }
-                    bazel_event::Evt::TestFailure(tfe) => {
-                        println!("Test failure: {:?}", tfe);
-                        let err_info = ErrorInfo {
-                            output_files: tfe.failed_files,
-                            target_kind: rule_kind_lookup.get(&tfe.label).map(|e| e.clone()),
-                            label: tfe.label,
-                        };
-                        println!("Error Info: {:?}", err_info);
-                    }
-                    bazel_event::Evt::UnknownEvent(_) => (),
-                },
             }
         }
     });
@@ -116,8 +111,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Service is up.");
     });
 
-    let res = bazel_runner::execute_bazel(opt.passthrough_args, bes_port).await;
+    let res = bazel_runner::execute_bazel(passthrough_args.clone(), bes_port).await;
+    let _ = {
+        let mut locked = sender_arc.lock().await;
+        locked.take();
+    };
+    // let _ = bes.write_channel.take();
+
     println!("{:?}", res);
+    println!("Awaiting task...");
+    recv_task.await?;
+    println!("Task completed...");
+
+    let (tx, rx) = broadcast::channel(256);
+    let _ = {
+        let mut locked = sender_arc.lock().await;
+        *locked = Some(tx);
+    };
+
+    let mut error_stream = ErrorInfo::build_transformer(rx);
+
+    let mut target_extracted_stream =
+        bazelfe::error_extraction::scala::stream_operator::build_transformer::<
+            ErrorInfo,
+            String,
+            CustError,
+        >(error_stream);
+
+    let recv_task = tokio::spawn(async move {
+        while let Some(action) = target_extracted_stream.recv().await {
+            match action {
+                None => println!("Build completed"),
+                Some(err_info) => {
+                    println!("Error info: {:?}", err_info);
+                }
+            }
+        }
+    });
+    let res = bazel_runner::execute_bazel(passthrough_args.clone(), bes_port).await;
+
+    let _ = {
+        let mut locked = sender_arc.lock().await;
+        locked.take();
+    };
+    // let _ = bes.write_channel.take();
+
+    println!("{:?}", res);
+    println!("Awaiting task...");
+    recv_task.await?;
+    println!("Task completed...");
 
     Ok(())
 }

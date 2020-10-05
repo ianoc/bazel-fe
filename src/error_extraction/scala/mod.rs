@@ -32,3 +32,5 @@ pub fn extract_errors(input: &str) -> Option<Vec<ClassImportRequest>> {
         Some(combined_vec)
     }
 }
+
+pub mod stream_operator;

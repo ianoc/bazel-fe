@@ -11,7 +11,7 @@ use google::devtools::build::v1::{
 };
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 
 pub mod bazel_event {
     use super::*;
@@ -186,7 +186,7 @@ pub struct BuildEventService<T>
 where
     T: Send + Sync + 'static,
 {
-    pub write_channel: broadcast::Sender<BuildEventAction<T>>,
+    pub write_channel: Arc<Mutex<Option<broadcast::Sender<BuildEventAction<T>>>>>,
     pub transform_fn:
         Arc<dyn Fn(&mut PublishBuildToolEventStreamRequest) -> Option<T> + Send + Sync>,
 }
@@ -197,14 +197,16 @@ fn transform_queue_error_to_status() -> Status {
 
 pub fn build_bazel_build_events_service() -> (
     BuildEventService<bazel_event::BazelBuildEvent>,
+    Arc<Mutex<Option<broadcast::Sender<BuildEventAction<bazel_event::BazelBuildEvent>>>>>,
     broadcast::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
 ) {
     let (tx, rx) = broadcast::channel(256);
+    let write_channel_arc = Arc::new(Mutex::new(Some(tx)));
     let server_instance = BuildEventService {
-        write_channel: tx,
+        write_channel: Arc::clone(&write_channel_arc),
         transform_fn: Arc::new(bazel_event::BazelBuildEvent::transform_from),
     };
-    (server_instance, rx)
+    (server_instance, write_channel_arc, rx)
 }
 
 #[tonic::async_trait]
@@ -226,7 +228,14 @@ where
         request: Request<tonic::Streaming<PublishBuildToolEventStreamRequest>>,
     ) -> Result<Response<Self::PublishBuildToolEventStreamStream>, Status> {
         let mut stream = request.into_inner();
-        let mut cloned_v = self.write_channel.clone();
+
+        let mut sender_ref = {
+            let e = Arc::clone(&self.write_channel);
+            let m = e.lock().await;
+            (*m).clone()
+        };
+        let mut cloned_v = sender_ref.clone();
+        let mut second_writer = sender_ref.clone();
         let transform_fn = Arc::clone(&self.transform_fn);
         let output = async_stream::try_stream! {
             while let Some(inbound_evt) = stream.next().await {
@@ -247,10 +256,15 @@ where
                 let transformed_data = (transform_fn)(&mut inbound_evt);
 
                 if let Some(r) = transformed_data {
-                    cloned_v.send(BuildEventAction::BuildEvent(r)).map_err(|_| transform_queue_error_to_status())?;
+                    if let Some(tx) = cloned_v.as_ref() {
+                        tx.send(BuildEventAction::BuildEvent(r)).map_err(|_| transform_queue_error_to_status())?;
+                    }
                 }
             }
-            cloned_v.send(BuildEventAction::BuildCompleted).map_err(|_| transform_queue_error_to_status())?;
+
+            if let Some(tx) = second_writer {
+                tx.send(BuildEventAction::BuildCompleted).map_err(|_| transform_queue_error_to_status())?;
+            }
 
         };
 
@@ -263,10 +277,16 @@ where
         &self,
         request: tonic::Request<PublishLifecycleEventRequest>,
     ) -> Result<tonic::Response<()>, tonic::Status> {
-        let mut cloned_v = self.write_channel.clone();
-        cloned_v
-            .send(BuildEventAction::LifecycleEvent(request.into_inner()))
-            .map_err(|_| transform_queue_error_to_status())?;
+        let mut cloned_v = {
+            let e = Arc::clone(&self.write_channel);
+            let m = e.lock().await;
+            (*m).clone()
+        };
+
+        if let Some(tx) = cloned_v {
+            tx.send(BuildEventAction::LifecycleEvent(request.into_inner()))
+                .map_err(|_| transform_queue_error_to_status())?;
+        }
         Ok(Response::new(()))
     }
 }
@@ -288,7 +308,6 @@ mod tests {
     use tempfile::tempdir;
     use tokio::net::UnixListener;
     use tokio::net::UnixStream;
-    use tokio::sync::mpsc;
     use tokio::time;
     use tonic::transport::Server;
     use tonic::transport::{Endpoint, Uri};

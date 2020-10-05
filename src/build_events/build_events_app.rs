@@ -3,13 +3,13 @@ extern crate log;
 
 use clap::Clap;
 
-use std::env;
+use std::{env, sync::Arc};
 use tonic::transport::Server;
 
 use ::prost::Message;
 use bazelfe::build_events::build_event_server::{BuildEventAction, BuildEventService};
 use bazelfe::protos::*;
-use tokio::prelude::*;
+use tokio::{prelude::*, sync::Mutex};
 
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
 use google::devtools::build::v1::PublishBuildToolEventStreamRequest;
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = broadcast::channel(32);
 
     let greeter = BuildEventService {
-        write_channel: tx,
+        write_channel: Arc::new(Mutex::new(Some(tx))),
         transform_fn: std::sync::Arc::new(transform_fn),
     };
 

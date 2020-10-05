@@ -1,9 +1,25 @@
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 use std::ffi::OsString;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::time::timeout;
+
 use tokio::process::Command;
+
+static sub_process_active: AtomicBool = AtomicBool::new(false);
+
+pub fn register_ctrlc_handler() {
+    ctrlc::set_handler(|| {
+        if (!sub_process_active.load(Ordering::SeqCst)) {
+            std::process::exit(137);
+        }
+    });
+}
 
 fn update_command<S: Into<String> + Clone>(
     command: &Vec<S>,
@@ -39,7 +55,6 @@ fn update_command<S: Into<String> + Clone>(
     let bes_section = vec![
         cmd[0].clone(),
         String::from("--build_event_publish_all_actions"),
-        String::from("--bes_upload_mode=fully_async"),
         String::from("--bes_backend"),
         String::from(format!("grpc://127.0.0.1:{}", srv_port)),
     ];
@@ -95,6 +110,8 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
 
     let mut child_stdout = child.stdout.take().expect("Child didn't have a stdout");
 
+    sub_process_active.store(true, Ordering::SeqCst);
+
     tokio::spawn(async move {
         let mut bytes_read = 1;
         let mut buffer = [0; 1024];
@@ -116,8 +133,11 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
             stderr.write_all(&buffer[0..bytes_read]).await.unwrap()
         }
     });
+    let child_pid = child.id() as i32;
 
     let result = child.await.expect("The command wasn't running");
+
+    sub_process_active.store(false, Ordering::SeqCst);
 
     ExecuteResult {
         exit_code: result.code().unwrap_or_else(|| -1),
