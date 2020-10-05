@@ -1,5 +1,3 @@
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
 use std::ffi::OsString;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,6 +53,8 @@ fn update_command<S: Into<String> + Clone>(
     let bes_section = vec![
         cmd[0].clone(),
         String::from("--build_event_publish_all_actions"),
+        String::from("--color"),
+        String::from("yes"),
         String::from("--bes_backend"),
         String::from(format!("grpc://127.0.0.1:{}", srv_port)),
     ];
