@@ -8,7 +8,7 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
-use super::ClassImportRequest;
+use super::super::ClassImportRequest;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;

@@ -17,41 +17,18 @@ use google::devtools::build::v1::publish_build_event_server::PublishBuildEventSe
 use google::devtools::build::v1::PublishBuildToolEventStreamRequest;
 use rand::Rng;
 use tokio::sync::broadcast;
+
 #[derive(Clap, Debug)]
 #[clap(name = "basic", setting = AppSettings::TrailingVarArg)]
 struct Opt {
     #[clap(long, env = "BIND_ADDRESS")]
     bind_address: Option<String>,
 
+    #[clap(long, env = "INDEX_INPUT_LOCATION", parse(from_os_str))]
+    index_input_location: Option<PathBuf>,
+
     #[clap(required = true, min_values = 1)]
     passthrough_args: Vec<String>,
-}
-
-struct CustError(ErrorInfo);
-impl From<ErrorInfo> for CustError {
-    fn from(ei: ErrorInfo) -> Self {
-        Self(ei)
-    }
-}
-impl ExtractClassData<String> for CustError {
-    fn paths(&self) -> Vec<std::path::PathBuf> {
-        self.0
-            .output_files
-            .iter()
-            .flat_map(|e| match e {
-                build_event_stream::file::File::Uri(e) => {
-                    let u: PathBuf = e.strip_prefix("file://").unwrap().into();
-                    println!("Path...: {:?}", u);
-                    Some(u)
-                }
-                build_event_stream::file::File::Contents(_) => None,
-            })
-            .collect()
-    }
-
-    fn id_info(&self) -> String {
-        self.0.label.clone()
-    }
 }
 
 #[tokio::main]
@@ -60,6 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = rand::thread_rng();
 
     bazel_runner::register_ctrlc_handler();
+
+    let aes = bazel_runner::action_event_stream::ActionEventStream::new(opt.index_input_location);
 
     let default_port = {
         let rand_v: u16 = rng.gen();
@@ -82,12 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut error_stream = ErrorInfo::build_transformer(rx);
 
-    let mut target_extracted_stream =
-        bazelfe::error_extraction::scala::stream_operator::build_transformer::<
-            ErrorInfo,
-            String,
-            CustError,
-        >(error_stream);
+    let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
 
     let recv_task = tokio::spawn(async move {
         while let Some(action) = target_extracted_stream.recv().await {
@@ -131,12 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut error_stream = ErrorInfo::build_transformer(rx);
 
-    let mut target_extracted_stream =
-        bazelfe::error_extraction::scala::stream_operator::build_transformer::<
-            ErrorInfo,
-            String,
-            CustError,
-        >(error_stream);
+    let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
 
     let recv_task = tokio::spawn(async move {
         while let Some(action) = target_extracted_stream.recv().await {

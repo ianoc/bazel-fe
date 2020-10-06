@@ -6,10 +6,16 @@ use nom::multi::{many0, many1};
 use nom::{bytes::complete::tag, combinator::map, combinator::opt, sequence::tuple, IResult};
 use std::{collections::HashMap, error::Error};
 
+#[derive(Clone, Debug)]
 pub struct IndexTable {
     tbl_map: HashMap<String, Vec<(u16, String)>>,
 }
 impl IndexTable {
+    pub fn new() -> Self {
+        Self {
+            tbl_map: HashMap::new(),
+        }
+    }
     pub fn get<S>(&self, key: S) -> Option<&Vec<(u16, String)>>
     where
         S: Into<String>,

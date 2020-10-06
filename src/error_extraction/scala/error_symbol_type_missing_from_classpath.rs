@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use super::ClassImportRequest;
+use super::super::ClassImportRequest;
 
 // Example usage:
 // This is with one plus deps enabled in rules scala

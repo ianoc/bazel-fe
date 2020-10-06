@@ -365,7 +365,7 @@ mod tests {
         let path_copy = path.clone();
         println!("Path: {:?}", path);
 
-        let (server_instance, rx) = build_bazel_build_events_service();
+        let (server_instance, _, rx) = build_bazel_build_events_service();
 
         let (promise, completion_pinky) = PinkySwear::<()>::new();
         let server_state = ServerStateHandler {
