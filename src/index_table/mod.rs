@@ -16,6 +16,11 @@ impl IndexTable {
             tbl_map: HashMap::new(),
         }
     }
+
+    pub fn from_hashmap(m: HashMap<String, Vec<(u16, String)>>) -> Self {
+        Self { tbl_map: m }
+    }
+
     pub fn get<S>(&self, key: S) -> Option<&Vec<(u16, String)>>
     where
         S: Into<String>,

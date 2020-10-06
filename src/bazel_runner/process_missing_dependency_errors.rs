@@ -4,11 +4,11 @@ use lazy_static::lazy_static;
 
 use crate::{build_events::error_type_extractor::ErrorInfo, index_table};
 
-fn add_for_class_name(
+fn get_candidates_for_class_name(
     error_info: &ErrorInfo,
     class_name: &str,
-    index_table: index_table::IndexTable,
-) {
+    index_table: &index_table::IndexTable,
+) -> Vec<(u16, String)> {
     lazy_static! {
       // These are things that are already implicit dependencencies so we should ensure they are not included
         static ref FORBIDDEN_TARGETS_BY_TYPE: HashMap<String, HashSet<String>> = {
@@ -48,7 +48,16 @@ fn add_for_class_name(
             }
         },
         None => (),
-    }
+    };
+
+    results = results
+        .into_iter()
+        .chain(super::expand_target_to_guesses::get_guesses_for_class_name(class_name).into_iter())
+        .map(|(a, b)| (a, super::sanitization_tools::sanitize_label(b)))
+        .collect();
+
+    results.sort_by(|a, b| b.0.cmp(&a.0));
+    results
 }
 
 pub fn process_missing_dependency_errors(
@@ -180,4 +189,47 @@ pub fn process_missing_dependency_errors(
     //         )
     //     }
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_candidates_from_map() {
+        let mut tbl_map = HashMap::new();
+        tbl_map.insert(
+            String::from("com.example.foo.bar.Baz"),
+            vec![(13, String::from("//src/main/foop/blah:oop"))],
+        );
+        let index_table = index_table::IndexTable::from_hashmap(tbl_map);
+
+        let error_info = ErrorInfo {
+            label: String::from("//src/main/foo/asd/we:wer"),
+            output_files: vec![],
+            target_kind: Some(String::from("scala_library")),
+        };
+
+        assert_eq!(
+            get_candidates_for_class_name(&error_info, "com.example.bar.Baz", &index_table),
+            vec![]
+        );
+
+        assert_eq!(
+            get_candidates_for_class_name(&error_info, "com.example.foo.bar.Baz", &index_table),
+            vec![
+                (13, String::from("//src/main/foop/blah:oop")),
+                (0, String::from("//src/main/scala/com/example/foo/bar:bar")),
+                (0, String::from("//src/main/java/com/example/foo/bar:bar"))
+            ]
+        );
+
+        assert_eq!(
+            get_candidates_for_class_name(&error_info, "com.example.a.b.c.Baz", &index_table),
+            vec![
+                (0, String::from("//src/main/scala/com/example/a/b/c:c")),
+                (0, String::from("//src/main/java/com/example/a/b/c:c"))
+            ]
+        );
+    }
 }
