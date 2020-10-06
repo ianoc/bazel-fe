@@ -66,9 +66,59 @@ pub(in crate::bazel_runner) fn prepare_class_import_requests(
     class_import_requests
 }
 
+fn split_clazz_to_lst(class_name: &str) -> Vec<String> {
+    let mut long_running_string = String::new();
+    let mut result = Vec::new();
+    class_name.split(".").for_each(|segment| {
+        if long_running_string.len() > 0 {
+            long_running_string = format!("{}.{}", long_running_string, segment);
+        } else {
+            long_running_string = segment.to_string();
+        }
+        result.push(long_running_string.to_string())
+    });
+    result.reverse();
+    result
+}
+
+pub(in crate::bazel_runner) fn expand_candidate_import_requests(
+    mut candidate_import_requests: Vec<ClassImportRequest>,
+) -> Vec<(ClassImportRequest, Vec<String>)> {
+    let mut candidate_import_requests = prepare_class_import_requests(candidate_import_requests);
+
+    candidate_import_requests.sort_by(|a, b| b.priority.cmp(&a.priority));
+
+    candidate_import_requests
+        .into_iter()
+        .map(|e| {
+            let sub_attempts = if (e.exact_only) {
+                vec![e.class_name.clone()]
+            } else {
+                split_clazz_to_lst(&e.class_name)
+            };
+            (e, sub_attempts)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_clazz_to_lst() {
+        assert_eq!(
+            split_clazz_to_lst("a.b.c.d"),
+            vec![
+                String::from("a.b.c.d"),
+                String::from("a.b.c"),
+                String::from("a.b"),
+                String::from("a"),
+            ]
+        );
+
+        assert_eq!(split_clazz_to_lst("abcd"), vec![String::from("abcd"),]);
+    }
 
     #[test]
     fn test_sanitize_label() {
@@ -188,6 +238,54 @@ mod tests {
                     src_fn: "unused",
                     priority: 1,
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_expand_candidate_import_requests() {
+        let input = vec![
+            ClassImportRequest {
+                class_name: String::from("asdf.sadf.sdfwer.sdf"),
+                exact_only: false,
+                src_fn: "unused",
+                priority: 1,
+            },
+            ClassImportRequest {
+                class_name: String::from("foo_bar_baz.sadf.sdfwer.sdfee"),
+                exact_only: true,
+                src_fn: "unused",
+                priority: 100,
+            },
+        ];
+
+        //pass through, no change
+        assert_eq!(
+            expand_candidate_import_requests(input),
+            vec![
+                (
+                    ClassImportRequest {
+                        class_name: String::from("foo_bar_baz.sadf.sdfwer.sdfee"),
+                        exact_only: true,
+                        src_fn: "unused",
+                        priority: 100,
+                    },
+                    vec![String::from("foo_bar_baz.sadf.sdfwer.sdfee"),]
+                ),
+                (
+                    ClassImportRequest {
+                        class_name: String::from("asdf.sadf.sdfwer.sdf"),
+                        exact_only: false,
+                        src_fn: "unused",
+                        priority: 1
+                    },
+                    vec![
+                        String::from("asdf.sadf.sdfwer.sdf"),
+                        String::from("asdf.sadf.sdfwer"),
+                        String::from("asdf.sadf"),
+                        String::from("asdf")
+                    ]
+                )
             ]
         );
     }

@@ -26,5 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &["proto/remote-apis", "proto/bazel_tools", "proto/googleapis"],
     )?;
 
+    tonic_build::configure().compile(&["proto/devtools/buildozer/api.proto"], &["proto"])?;
+
     Ok(())
 }

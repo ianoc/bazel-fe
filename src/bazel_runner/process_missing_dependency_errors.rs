@@ -1,8 +1,14 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use lazy_static::lazy_static;
 
-use crate::{build_events::error_type_extractor::ErrorInfo, index_table};
+use crate::{
+    build_events::error_type_extractor::ErrorInfo, buildozer_driver::Buildozer, error_extraction,
+    index_table,
+};
 
 fn get_candidates_for_class_name(
     error_info: &ErrorInfo,
@@ -60,35 +66,73 @@ fn get_candidates_for_class_name(
     results
 }
 
-pub fn process_missing_dependency_errors(
+pub fn is_potentially_valid_target(label: &str) -> bool {
+    let prepared_path = label.strip_prefix("//").and_then(|e| e.split(":").next());
+    match prepared_path {
+        Some(p) => {
+            let path = Path::new(p);
+            path.join("BUILD").exists()
+        }
+        None => true,
+    }
+}
+
+pub async fn process_missing_dependency_errors<T: Buildozer + Send + 'static>(
+    candidate_import_requests: Vec<error_extraction::ClassImportRequest>,
     global_previous_seen: HashSet<String>,
-    local_previous_Seen: HashSet<String>,
+    buildozer: T,
+    error_info: &ErrorInfo,
+    index_table: &index_table::IndexTable,
     next_failing_target: &ErrorInfo,
     error_ln: &String,
     line_number: u32,
     file_lines: &Vec<String>,
 ) -> HashSet<String> {
+    let mut local_previous_seen: HashSet<String> = HashSet::new();
+
+    let mut candidate_import_requests =
+        super::sanitization_tools::expand_candidate_import_requests(candidate_import_requests);
+
+    let ignore_dep_referneces: HashSet<String> = {
+        let mut to_ignore = HashSet::new();
+        let d = buildozer.print_deps(&error_info.label).await.unwrap();
+        d.into_iter().for_each(|dep| {
+            to_ignore.insert(super::sanitization_tools::sanitize_label(dep));
+        });
+
+        global_previous_seen.into_iter().for_each(|dep| {
+            to_ignore.insert(super::sanitization_tools::sanitize_label(dep));
+        });
+
+        to_ignore.insert(super::sanitization_tools::sanitize_label(
+            error_info.label.clone(),
+        ));
+        to_ignore
+    };
+
+    for (candidate, inner_versions) in candidate_import_requests.into_iter() {
+        'class_entry_loop: for class_name in inner_versions {
+            let candidates: Vec<(u16, String)> =
+                get_candidates_for_class_name(&error_info, &class_name, &index_table);
+            for (_, target_name) in candidates {
+                if !ignore_dep_referneces.contains(&target_name)
+                    && is_potentially_valid_target(&target_name)
+                {
+                    // If our top candidate hits to be a local previous seen stop
+                    // processing this class
+                    if (local_previous_seen.contains(&target_name)) {
+                        break 'class_entry_loop;
+                    }
+
+                    // otherwise... add the dependency with buildozer here
+                    // then add it ot the local seen dependencies
+                    unimplemented!()
+                }
+            }
+        }
+    }
+
     unimplemented!()
-
-    // def apply(
-    //     globalPreviousSeen: Set[String],
-    //     localPreviousSeen: Set[String],
-    //     nextFailingTarget: ErrorInfo,
-    //     ln: String,
-    //     lnIndx: Int,
-    //     allLines: List[String]
-    // )(
-    //     implicit logger: BazelRunnerLogger,
-    //     classTargetIndex: ClassTargetIndex,
-    //     buildozerPath: BuildozerPath
-    // ): Set[String] = {
-    //   val rawCandidateClasses = TargetClassExtraction(
-    //     ErrorContext(ln, lnIndx, allLines)
-    //   )
-
-    // accounting for trailing /
-    //   def sanitizedCompare(a: String, b: String): Boolean =
-    //     a.replace("/", "") == b.replace("/", "")
 
     //   candidateClasses
     //   // sort by most specific to least

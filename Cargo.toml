@@ -26,6 +26,7 @@ log = "0.4"
 async-stream = "0.3.0"
 bytes = "0.5.6"
 ctrlc = "3.1.6"
+async-trait = "0.1.41"
 
 [dev-dependencies]
 tempfile = "3.1.0"
@@ -71,3 +72,9 @@ path = "src/build_events/build_events_app.rs"
 [[bin]]
 name = "bazel-runner"
 path = "src/bazel_runner/bazel_runner_app.rs"
+
+
+[[bin]]
+name = "buildozer-driver"
+path = "src/buildozer_driver/buildozer_driver_app.rs"
+

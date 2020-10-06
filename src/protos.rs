@@ -56,3 +56,9 @@ pub mod build {
 pub mod bazel_tools {
     tonic::include_proto!("bazel_tools");
 }
+
+pub mod devtools {
+    pub mod buildozer {
+        tonic::include_proto!("devtools.buildozer");
+    }
+}
