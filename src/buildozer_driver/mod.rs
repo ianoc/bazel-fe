@@ -63,7 +63,7 @@ impl BuildozerBinaryImpl {
     async fn execute_command<S: Into<String> + Clone>(
         &self,
         command: Vec<S>,
-    ) -> Result<devtools::buildozer::Output> {
+    ) -> Result<(Vec<OsString>, devtools::buildozer::Output)> {
         let command: Vec<OsString> = {
             let v = vec![String::from("--output_proto")];
 
@@ -87,14 +87,14 @@ impl BuildozerBinaryImpl {
         }
 
         let out = devtools::buildozer::Output::decode(&*command_result.stdout).unwrap();
-        Ok(out)
+        Ok((command, out))
     }
 }
 
 #[async_trait]
 impl Buildozer for BuildozerBinaryImpl {
     async fn print_deps(&self, label: &String) -> Result<Vec<String>> {
-        let cmd_result = self.execute_command(vec!["print deps", &label]).await?;
+        let (raw_args, cmd_result) = self.execute_command(vec!["print deps", &label]).await?;
 
         Ok(cmd_result
             .records
@@ -112,8 +112,9 @@ impl Buildozer for BuildozerBinaryImpl {
                         devtools::buildozer::output::record::field::Value::Number(num) => {
                             panic!("Unexpected number entry: {:?}", num)
                         }
-                        devtools::buildozer::output::record::field::Value::Error(err) => {
-                            panic!("Unexpected error entry: {:?}", err)
+                        devtools::buildozer::output::record::field::Value::Error(_) => {
+                            // This happens if the deps aren't present, its not meaningful :/
+                            vec![].into_iter()
                         }
                     },
                 })
