@@ -10,6 +10,8 @@ use crate::{
     index_table,
 };
 
+use log;
+
 fn get_candidates_for_class_name(
     error_info: &ErrorInfo,
     class_name: &str,
@@ -77,23 +79,19 @@ pub fn is_potentially_valid_target(label: &str) -> bool {
     }
 }
 
-pub async fn process_missing_dependency_errors<T: Buildozer + Send + 'static>(
+pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Sync + 'static>(
     candidate_import_requests: Vec<error_extraction::ClassImportRequest>,
     global_previous_seen: HashSet<String>,
     buildozer: T,
     error_info: &ErrorInfo,
     index_table: &index_table::IndexTable,
-    next_failing_target: &ErrorInfo,
-    error_ln: &String,
-    line_number: u32,
-    file_lines: &Vec<String>,
-) -> HashSet<String> {
+) -> (HashSet<String>, u32) {
     let mut local_previous_seen: HashSet<String> = HashSet::new();
 
     let mut candidate_import_requests =
         super::sanitization_tools::expand_candidate_import_requests(candidate_import_requests);
 
-    let ignore_dep_referneces: HashSet<String> = {
+    let mut ignore_dep_referneces: HashSet<String> = {
         let mut to_ignore = HashSet::new();
         let d = buildozer.print_deps(&error_info.label).await.unwrap();
         d.into_iter().for_each(|dep| {
@@ -110,10 +108,13 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Send + 'static>(
         to_ignore
     };
 
-    for (candidate, inner_versions) in candidate_import_requests.into_iter() {
+    let mut actions_completed: u32 = 0;
+    log::debug!("ignore_dep_references: {:?}", ignore_dep_referneces);
+    for (_, inner_versions) in candidate_import_requests.into_iter() {
         'class_entry_loop: for class_name in inner_versions {
             let candidates: Vec<(u16, String)> =
                 get_candidates_for_class_name(&error_info, &class_name, &index_table);
+            log::debug!("Candidates: {:?}", candidates);
             for (_, target_name) in candidates {
                 if !ignore_dep_referneces.contains(&target_name)
                     && is_potentially_valid_target(&target_name)
@@ -126,113 +127,26 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Send + 'static>(
 
                     // otherwise... add the dependency with buildozer here
                     // then add it ot the local seen dependencies
-                    unimplemented!()
+                    log::info!("Calling buildozer for: {:?}", target_name);
+                    buildozer
+                        .add_dependency(&error_info.label, &target_name)
+                        .await
+                        .unwrap();
+                    actions_completed += 1;
+
+                    local_previous_seen.insert(target_name.clone());
+
+                    // Now that we have a version with a match we can jump right out to the outside
+                    break 'class_entry_loop;
                 }
             }
         }
     }
 
-    unimplemented!()
-
-    //   candidateClasses
-    //   // sort by most specific to least
-    //     .foldLeft(localPreviousSeen) {
-    //       case (localPreviousSeen, targetInfo) =>
-    //         val ClassImportRequest(targetClass, exactMatch, dbgSource, _) = targetInfo
-
-    //         @annotation.tailrec
-    //         def go(remainingPieces: List[String], outerUsedUpSoFar: Set[String]): Set[String] = {
-    //           val clazzName = remainingPieces.reverse.mkString(".")
-    //           logger.debug(
-    //             s"[$dbgSource][exactMatch: ${exactMatch}] For class ${targetClass}: looking up - ${clazzName}"
-    //           )
-    //           val forbiddenTargetsForType =
-    //             forbidddenTargetsByType.get(nextFailingTarget.targetKind).getOrElse(Set())
-
-    //           val targetsToTryAdd: List[String] = (classTargetIndex
-    //             .get(clazzName)
-    //             .map(_.toList)
-    //             .getOrElse(Nil)
-    //             .filterNot { e =>
-    //               forbiddenTargetsForType.contains(e)
-    //             } ++ ExpandToTargetGuesses(clazzName))
-    //             .filter { t =>
-    //               !globalPreviousSeen.contains(t)
-    //             }
-    //             .filter { candidate =>
-    //               // Here we are normalizing
-    //               // src/foo/bar/baz and src/foo/bar/baz:baz
-    //               // ensures we don't try refer to ourselves
-    //               val candidateT =
-    //                 if (candidate.contains(":")) candidate
-    //                 else s"${candidate}:${candidate.split('/').last}"
-    //               val updatedT =
-    //                 if (targetLabel.contains(":")) targetLabel
-    //                 else s"${targetLabel}:${targetLabel.split('/').last}"
-    //               updatedT != candidateT
-    //             }
-    //             .distinct
-
-    //           targetsToTryAdd.foreach { t =>
-    //             logger.info(s"Target to try add: $t for clazz : $clazzName")
-    //           }
-    //           if (targetsToTryAdd.exists { e =>
-    //                 localPreviousSeen.contains(e)
-    //               }) {
-    //             logger.debug(
-    //               s"[$dbgSource] For class ${targetClass}: already applied ${targetsToTryAdd.filter { e =>
-    //                 localPreviousSeen.contains(e)
-    //               }.headOption}"
-    //             )
-    //             outerUsedUpSoFar
-    //           } else {
-
-    //             @annotation.tailrec
-    //             def applyToFirstSuccessfulTarget(
-    //                 targetsToTryAdd: List[String],
-    //                 usedUpSoFar: Set[String]
-    //             ): (Boolean, Set[String]) =
-    //               targetsToTryAdd match {
-    //                 case nxt :: t if sanitizedCompare(nxt, nextFailingTarget.label) =>
-    //                   applyToFirstSuccessfulTarget(t, usedUpSoFar)
-    //                 case nxt :: t =>
-    //                   val nextUsedUp = usedUpSoFar + nxt
-    //                   val buildozerCommand = s"${buildozerPath.s} 'add deps $nxt' ${targetLabel}"
-    //                   val retCode = ProcessRunner.executeCommand(Parser.tokenize(buildozerCommand))(
-    //                     StreamHandler.blackHole
-    //                   )
-    //                   if (retCode == 0) {
-    //                     logger.debugAction(s"${ln}:$dbgSource")
-    //                     System.err.println(
-    //                       s"${Console.GREEN}${Console.BOLD}bazel-cmd-helper${Console.GREEN}: Add dependency $nxt to ${targetLabel}. While attempting to repair: ${clazzName} ${Console.RESET}"
-    //                     )
-    //                     logger.info(
-    //                       s"[$dbgSource] [buildozer] added $nxt to ${targetLabel} - searching for class ${clazzName} --- ${buildozerCommand}"
-    //                     )
-    //                     (true, nextUsedUp)
-    //                   } else {
-    //                     logger.info(s"[$dbgSource] Buildozer command failed: ${buildozerCommand}")
-    //                     applyToFirstSuccessfulTarget(t, nextUsedUp)
-    //                   }
-    //                 case Nil => (false, Set())
-    //               }
-
-    //             applyToFirstSuccessfulTarget(targetsToTryAdd, Set()) match {
-    //               case (true, s) => outerUsedUpSoFar ++ s
-    //               // Only recurse if we have more than tld.toplevel to recurse on.
-    //               // a `com.google` or `com.twitter` is just too generic
-    //               case (false, s) if (remainingPieces.size > 3 && !exactMatch) =>
-    //                 go(remainingPieces.tail, outerUsedUpSoFar ++ s)
-    //               case (false, s) => outerUsedUpSoFar ++ s
-    //             }
-    //           }
-    //         }
-    //         globalPreviousSeen ++ localPreviousSeen ++ go(
-    //           targetClass.split('.').toList.reverse,
-    //           Set()
-    //         )
-    //     }
-    // }
+    // concat the global perm ignore with the local_previous seen data
+    // this becomes our next global ignore for this target
+    ignore_dep_referneces.extend(local_previous_seen);
+    (ignore_dep_referneces, actions_completed)
 }
 
 #[cfg(test)]

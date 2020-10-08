@@ -5,18 +5,20 @@ use clap::{AppSettings, Clap};
 use std::{collections::HashMap, path::PathBuf};
 
 use std::env;
+use std::sync::atomic::Ordering;
 use tonic::transport::Server;
 
 use bazelfe::protos::*;
-use tokio::prelude::*;
 
 use bazelfe::bazel_runner;
+use bazelfe::build_events::build_event_server::bazel_event;
+use bazelfe::build_events::build_event_server::BuildEventAction;
 use bazelfe::build_events::error_type_extractor::ErrorInfo;
-use bazelfe::error_extraction::scala::stream_operator::ExtractClassData;
+use bazelfe::buildozer_driver;
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
-use google::devtools::build::v1::PublishBuildToolEventStreamRequest;
 use rand::Rng;
-use tokio::sync::broadcast;
+use std::sync::Arc;
+use tokio::sync::{broadcast, Mutex};
 
 #[derive(Clap, Debug)]
 #[clap(name = "basic", setting = AppSettings::TrailingVarArg)]
@@ -27,18 +29,80 @@ struct Opt {
     #[clap(long, env = "INDEX_INPUT_LOCATION", parse(from_os_str))]
     index_input_location: Option<PathBuf>,
 
+    #[clap(long, env = "BUILDOZER_PATH", parse(from_os_str))]
+    buildozer_path: PathBuf,
+
     #[clap(required = true, min_values = 1)]
     passthrough_args: Vec<String>,
 }
+// BuildEventService<bazel_event::BazelBuildEvent>,
+// Arc<Mutex<Option<broadcast::Sender<BuildEventAction<bazel_event::BazelBuildEvent>>>>>,
+// broadcast::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
 
+async fn spawn_bazel_attempt<T>(
+    sender_arc: &Arc<
+        Mutex<Option<broadcast::Sender<BuildEventAction<bazel_event::BazelBuildEvent>>>>,
+    >,
+    aes: &bazel_runner::action_event_stream::ActionEventStream<T>,
+    bes_port: u16,
+    passthrough_args: &Vec<String>,
+) -> (u32, bazel_runner::ExecuteResult)
+where
+    T: bazelfe::buildozer_driver::Buildozer + Send + Clone + Sync + 'static,
+{
+    let (tx, rx) = broadcast::channel(8192);
+    let _ = {
+        let mut locked = sender_arc.lock().await;
+        *locked = Some(tx);
+    };
+    let error_stream = ErrorInfo::build_transformer(rx);
+
+    let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
+
+    let actions_completed: Arc<std::sync::atomic::AtomicU32> =
+        Arc::new(std::sync::atomic::AtomicU32::new(0));
+
+    let recv_ver = Arc::clone(&actions_completed);
+    let recv_task = tokio::spawn(async move {
+        while let Some(action) = target_extracted_stream.recv().await {
+            match action {
+                None => (),
+                Some(err_info) => {
+                    recv_ver.fetch_add(err_info, Ordering::Relaxed);
+                }
+            }
+        }
+    });
+    let res = bazel_runner::execute_bazel(passthrough_args.clone(), bes_port).await;
+
+    info!("Bazel completed with state: {:?}", res);
+    let _ = {
+        let mut locked = sender_arc.lock().await;
+        locked.take();
+    };
+
+    recv_task.await.unwrap();
+    info!("Receive task done");
+    (actions_completed.fetch_add(0, Ordering::Relaxed), res)
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = Opt::parse();
     let mut rng = rand::thread_rng();
+    let mut builder = pretty_env_logger::formatted_timed_builder();
+    builder.format_timestamp_nanos();
+    if let Ok(s) = ::std::env::var("RUST_LOG") {
+        builder.parse_filters(&s);
+    }
+
+    builder.init();
 
     bazel_runner::register_ctrlc_handler();
 
-    let aes = bazel_runner::action_event_stream::ActionEventStream::new(opt.index_input_location);
+    let aes = bazel_runner::action_event_stream::ActionEventStream::new(
+        opt.index_input_location,
+        buildozer_driver::from_binary_path(opt.buildozer_path),
+    );
 
     let default_port = {
         let rand_v: u16 = rng.gen();
@@ -56,23 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let passthrough_args = opt.passthrough_args.clone();
     info!("Services listening on {}", addr);
 
-    let (bes, sender_arc, mut rx) =
+    let (bes, sender_arc, _) =
         bazelfe::build_events::build_event_server::build_bazel_build_events_service();
-
-    let mut error_stream = ErrorInfo::build_transformer(rx);
-
-    let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
-
-    let recv_task = tokio::spawn(async move {
-        while let Some(action) = target_extracted_stream.recv().await {
-            match action {
-                None => println!("Build completed"),
-                Some(err_info) => {
-                    println!("Error info: {:?}", err_info);
-                }
-            }
-        }
-    });
 
     let bes_port: u16 = addr.port();
 
@@ -82,53 +131,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .serve(addr)
             .await
             .unwrap();
-        println!("Service is up.");
     });
 
-    let res = bazel_runner::execute_bazel(passthrough_args.clone(), bes_port).await;
-    let _ = {
-        let mut locked = sender_arc.lock().await;
-        locked.take();
-    };
-    // let _ = bes.write_channel.take();
+    let mut attempts: u16 = 0;
 
-    println!("{:?}", res);
-    println!("Awaiting task...");
-    recv_task.await?;
-    println!("Task completed...");
-
-    let (tx, rx) = broadcast::channel(256);
-    let _ = {
-        let mut locked = sender_arc.lock().await;
-        *locked = Some(tx);
-    };
-
-    let mut error_stream = ErrorInfo::build_transformer(rx);
-
-    let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
-
-    let recv_task = tokio::spawn(async move {
-        while let Some(action) = target_extracted_stream.recv().await {
-            match action {
-                None => println!("Build completed"),
-                Some(err_info) => {
-                    println!("Error info: {:?}", err_info);
-                }
-            }
+    while attempts < 5 {
+        let (actions_corrected, bazel_result) =
+            spawn_bazel_attempt(&sender_arc, &aes, bes_port, &passthrough_args).await;
+        if bazel_result.exit_code == 0 || actions_corrected == 0 {
+            break;
         }
-    });
-    let res = bazel_runner::execute_bazel(passthrough_args.clone(), bes_port).await;
-
-    let _ = {
-        let mut locked = sender_arc.lock().await;
-        locked.take();
-    };
-    // let _ = bes.write_channel.take();
-
-    println!("{:?}", res);
-    println!("Awaiting task...");
-    recv_task.await?;
-    println!("Task completed...");
+        attempts += 1;
+    }
 
     Ok(())
 }

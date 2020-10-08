@@ -45,14 +45,3 @@ pub struct ParsedFile {
 
 pub mod java;
 pub mod scala;
-
-pub fn parse_path(path: &PathBuf, input: &str) -> Option<Result<ParsedFile>> {
-    match path.extension() {
-        None => None,
-        Some(ext) => match ext.to_str() {
-            Some("scala") => Some(scala::parse_file(input)),
-            Some("java") => Some(java::parse_file(input)),
-            _ => None,
-        },
-    }
-}

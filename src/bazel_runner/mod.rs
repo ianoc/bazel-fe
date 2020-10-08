@@ -9,14 +9,23 @@ use tokio::time::timeout;
 
 use tokio::process::Command;
 
-static sub_process_active: AtomicBool = AtomicBool::new(false);
+static sub_process_pid: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub fn register_ctrlc_handler() {
-    ctrlc::set_handler(|| {
-        if (!sub_process_active.load(Ordering::SeqCst)) {
+    ctrlc::set_handler(move || {
+        let current_sub_process_pid: u32 = sub_process_pid.load(Ordering::SeqCst);
+        info!("Received ctrl-c, state: {:?}", sub_process_pid);
+
+        // no subprocess_pid
+        if (current_sub_process_pid == 0) {
+            info!(
+                "Shutting down via ctrl-c, sub_process_pid: {:?}",
+                sub_process_pid
+            );
             std::process::exit(137);
         }
-    });
+    })
+    .expect("Error setting Ctrl-C handler");
 }
 
 fn update_command<S: Into<String> + Clone>(
@@ -53,6 +62,8 @@ fn update_command<S: Into<String> + Clone>(
     let bes_section = vec![
         cmd[0].clone(),
         String::from("--build_event_publish_all_actions"),
+        String::from("--experimental_build_event_upload_strategy=local"),
+        String::from("--build_event_text_file_path_conversion"),
         String::from("--color"),
         String::from("yes"),
         String::from("--bes_backend"),
@@ -99,7 +110,7 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
             .collect(),
     };
 
-    println!("{:?} {:?}", application, updated_command);
+    log::info!("{:?} {:?}", application, updated_command);
     let mut cmd = Command::new(application);
 
     cmd.args(&updated_command)
@@ -107,10 +118,9 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
         .stderr(Stdio::piped());
 
     let mut child = cmd.spawn().expect("failed to start bazel process");
+    sub_process_pid.store(child.id(), Ordering::SeqCst);
 
     let mut child_stdout = child.stdout.take().expect("Child didn't have a stdout");
-
-    sub_process_active.store(true, Ordering::SeqCst);
 
     tokio::spawn(async move {
         let mut bytes_read = 1;
@@ -133,11 +143,9 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
             stderr.write_all(&buffer[0..bytes_read]).await.unwrap()
         }
     });
-    let child_pid = child.id() as i32;
-
     let result = child.await.expect("The command wasn't running");
 
-    sub_process_active.store(false, Ordering::SeqCst);
+    sub_process_pid.store(0, Ordering::SeqCst);
 
     ExecuteResult {
         exit_code: result.code().unwrap_or_else(|| -1),

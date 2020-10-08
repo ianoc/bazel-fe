@@ -25,6 +25,7 @@ pub mod bazel_event {
         pub fn transform_from(
             inbound_evt: &mut PublishBuildToolEventStreamRequest,
         ) -> Option<BazelBuildEvent> {
+            info!("Transformation function started");
             let mut inner_data = inbound_evt
                 .ordered_build_event
                 .take()
@@ -144,6 +145,7 @@ pub mod bazel_event {
                 None => Evt::UnknownEvent("Missing Event".to_string()),
             };
 
+            info!("Decoded evt: {:?}", decoded_evt);
             Some(BazelBuildEvent { event: decoded_evt })
         }
     }
@@ -200,7 +202,7 @@ pub fn build_bazel_build_events_service() -> (
     Arc<Mutex<Option<broadcast::Sender<BuildEventAction<bazel_event::BazelBuildEvent>>>>>,
     broadcast::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
 ) {
-    let (tx, rx) = broadcast::channel(256);
+    let (tx, rx) = broadcast::channel(2048);
     let write_channel_arc = Arc::new(Mutex::new(Some(tx)));
     let server_instance = BuildEventService {
         write_channel: Arc::clone(&write_channel_arc),
@@ -240,32 +242,45 @@ where
         let output = async_stream::try_stream! {
             while let Some(inbound_evt) = stream.next().await {
                 let mut inbound_evt = inbound_evt?;
+            //     // info!("Starting to process event...{:?}", inbound_evt);
+            //     info!("Printed out data");
 
                 match inbound_evt.ordered_build_event.as_ref() {
                     Some(build_event) => {
-                    let sequence_number = build_event.sequence_number;
-                let stream_id = build_event.stream_id.clone();
+                        let sequence_number = build_event.sequence_number;
+                    let stream_id = build_event.stream_id.clone();
+                    yield PublishBuildToolEventStreamResponse {
+                        stream_id: build_event.stream_id.clone(),
+                        sequence_number: sequence_number
+                    };
 
-                yield PublishBuildToolEventStreamResponse {
-                    stream_id: stream_id,
-                    sequence_number: sequence_number
-                };
             }
                     None => ()
                 };
+                info!("Calling transform");
                 let transformed_data = (transform_fn)(&mut inbound_evt);
 
                 if let Some(r) = transformed_data {
                     if let Some(tx) = cloned_v.as_ref() {
-                        tx.send(BuildEventAction::BuildEvent(r)).map_err(|_| transform_queue_error_to_status())?;
+                        let tx2 = tx.clone();
+                        tokio::spawn(async move {
+                            let err = tx2.send(BuildEventAction::BuildEvent(r)).map_err(|_| transform_queue_error_to_status());
+                            match err {
+                                Ok(_) => (),
+                                Err(e) =>
+                                    error!("Error publishing to queue {}", e)
+                            }
+                        });
                     }
                 }
+            //     info!("Finished to process event...");
             }
+
 
             if let Some(tx) = second_writer {
                 tx.send(BuildEventAction::BuildCompleted).map_err(|_| transform_queue_error_to_status())?;
             }
-
+            info!("Finished stream...");
         };
 
         Ok(Response::new(
@@ -277,14 +292,17 @@ where
         &self,
         request: tonic::Request<PublishLifecycleEventRequest>,
     ) -> Result<tonic::Response<()>, tonic::Status> {
-        let mut cloned_v = {
+        let cloned_v = {
             let e = Arc::clone(&self.write_channel);
             let m = e.lock().await;
             (*m).clone()
         };
 
         if let Some(tx) = cloned_v {
-            tx.send(BuildEventAction::LifecycleEvent(request.into_inner()))
+            let inner = request.into_inner();
+            info!("life cycle event: {:?}", inner);
+
+            tx.send(BuildEventAction::LifecycleEvent(inner))
                 .map_err(|_| transform_queue_error_to_status())?;
         }
         Ok(Response::new(()))

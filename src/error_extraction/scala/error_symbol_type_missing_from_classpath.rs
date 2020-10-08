@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use super::super::ClassImportRequest;
+use super::ScalaClassImportRequest;
 
 // Example usage:
 // This is with one plus deps enabled in rules scala
@@ -26,8 +26,12 @@ use super::super::ClassImportRequest;
 //     def fooA = ???
 //   }
 
-fn build_class_import_request(class_name: String) -> ClassImportRequest {
-    ClassImportRequest {
+fn build_class_import_request(
+    source_file_name: String,
+    class_name: String,
+) -> ScalaClassImportRequest {
+    ScalaClassImportRequest {
+        src_file_name: source_file_name,
         class_name: class_name,
         exact_only: false,
         src_fn: "extract_symbol_type_missing_from_classpath",
@@ -35,10 +39,12 @@ fn build_class_import_request(class_name: String) -> ClassImportRequest {
     }
 }
 
-pub fn extract(input: &str) -> Option<Vec<ClassImportRequest>> {
+pub fn extract(input: &str) -> Option<Vec<ScalaClassImportRequest>> {
     lazy_static! {
-        static ref RE: Regex =
-            Regex::new(r"^src/[^.]*.scala.*error: Symbol 'type ([A-Za-z0-9.<>_]+)' is missing from the classpath.$").unwrap();
+        static ref RE: Regex = Regex::new(
+            r"^(.*\.scala).*error: Symbol 'type ([A-Za-z0-9.<>_]+)' is missing from the classpath.$"
+        )
+        .unwrap();
     }
 
     let mut result = None;
@@ -48,8 +54,10 @@ pub fn extract(input: &str) -> Option<Vec<ClassImportRequest>> {
         match captures {
             None => (),
             Some(captures) => {
-                let class_name = captures.get(1).unwrap().as_str();
-                let class_import_request = build_class_import_request(class_name.to_string());
+                let src_file_name = captures.get(1).unwrap().as_str();
+                let class_name = captures.get(2).unwrap().as_str();
+                let class_import_request =
+                    build_class_import_request(src_file_name.to_string(), class_name.to_string());
                 result = match result {
                     None => Some(vec![class_import_request]),
                     Some(ref mut inner) => {
@@ -82,6 +90,7 @@ one error found";
         assert_eq!(
             extract(sample_output),
             Some(vec![build_class_import_request(
+                String::from("src/main/scala/com/example/D.scala"),
                 "com.example.a.ATrait".to_string()
             )])
         );

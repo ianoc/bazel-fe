@@ -64,8 +64,10 @@ fn parse_file_e(input: &str) -> IResult<&str, Vec<(String, Vec<(u16, String)>)>>
 }
 
 pub fn parse_file(input: &str) -> Result<IndexTable, Box<dyn Error>> {
+    debug!("Start parsing");
+
     let extracted_result: Vec<(String, Vec<(u16, String)>)> = parse_file_e(input).unwrap().1;
-    println!("Finished parsing..");
+    debug!("Finished parsing..");
 
     let mut index_data = HashMap::new();
     index_data.reserve(extracted_result.len());
