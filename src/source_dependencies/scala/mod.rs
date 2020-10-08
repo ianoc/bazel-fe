@@ -72,7 +72,7 @@ where
         map(tuple((multispace0, tag("._"))), |_| {
             SelectorType::WildcardSelector()
         }),
-        map(tuple((space0, is_not("."))), |_| SelectorType::NoSelector()),
+        map(tuple((space0, is_not("."))), |_| SelectorType::NoSelector),
     ))
 }
 
@@ -108,7 +108,7 @@ pub fn parse_import(line_number: u32, input: &str) -> IResult<&str, Import> {
             Import {
                 line_number: line_number,
                 prefix_section: extracted.to_string(),
-                suffix: SelectorType::NoSelector(),
+                suffix: SelectorType::NoSelector,
             },
         ))
     }
@@ -160,7 +160,7 @@ fn extract_package_from_file(file_lines: &str) -> Result<Option<&str>> {
 // PUBLIC METHODS
 pub fn parse_imports(input: &str) -> Result<Vec<Import>> {
     let mut results_vec = Vec::new();
-    let mut line_number = 0;
+    let mut line_number = 1;
     let mut remaining_input = input;
     while remaining_input.len() > 3 {
         match eat_till_end_of_line(remaining_input) {
@@ -252,9 +252,9 @@ mod tests {
     fn parse_simple_input() {
         let sample_input = "import com.twitter.scalding.RichDate";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twitter.scalding.RichDate".to_string(),
-            suffix: SelectorType::NoSelector(),
+            suffix: SelectorType::NoSelector,
         }];
 
         let parsed_result = parse_imports(sample_input).unwrap();
@@ -271,19 +271,19 @@ mod tests {
         ";
         let expected_results = vec![
             Import {
-                line_number: 1,
-                prefix_section: "com.twitter.scalding.RichDate".to_string(),
-                suffix: SelectorType::NoSelector(),
-            },
-            Import {
                 line_number: 2,
                 prefix_section: "com.twitter.scalding.RichDate".to_string(),
-                suffix: SelectorType::NoSelector(),
+                suffix: SelectorType::NoSelector,
             },
             Import {
-                line_number: 4,
+                line_number: 3,
                 prefix_section: "com.twitter.scalding.RichDate".to_string(),
-                suffix: SelectorType::NoSelector(),
+                suffix: SelectorType::NoSelector,
+            },
+            Import {
+                line_number: 5,
+                prefix_section: "com.twitter.scalding.RichDate".to_string(),
+                suffix: SelectorType::NoSelector,
             },
         ];
 
@@ -295,7 +295,7 @@ mod tests {
     fn sub_sections() {
         let sample_input = "import com.twitter.scalding.{RichDate, DateOps}";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twitter.scalding".to_string(),
             suffix: SelectorType::SelectorList(vec![
                 ("RichDate".to_string(), None),
@@ -311,7 +311,7 @@ mod tests {
     fn test_wildcard() {
         let sample_input = "import com.twitter.scalding._";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twitter.scalding".to_string(),
             suffix: SelectorType::WildcardSelector(),
         }];
@@ -328,7 +328,7 @@ mod tests {
     fn test_alias() {
         let sample_input = "import com.twitter.scalding.{RichDate => MyRichDate}";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twitter.scalding".to_string(),
             suffix: SelectorType::SelectorList(vec![(
                 "RichDate".to_string(),
@@ -344,7 +344,7 @@ mod tests {
     fn test_backticks() {
         let sample_input = "import com.twitter.scalding.{`RichDate foo bar baz` => MyRichDate}";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twitter.scalding".to_string(),
             suffix: SelectorType::SelectorList(vec![(
                 "RichDate foo bar baz".to_string(),
@@ -360,7 +360,7 @@ mod tests {
     fn test_underscores() {
         let sample_input = "import _root_.com.twit__ter.scalding.{My_Richness => MyRichD_ate}";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twit__ter.scalding".to_string(),
             suffix: SelectorType::SelectorList(vec![(
                 "My_Richness".to_string(),

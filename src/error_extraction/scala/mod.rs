@@ -77,7 +77,7 @@ pub fn extract_errors(input: &str) -> Option<Vec<super::ClassImportRequest>> {
                         crate::source_dependencies::SelectorType::WildcardSelector() => {
                             Some(&e.prefix_section)
                         }
-                        crate::source_dependencies::SelectorType::NoSelector() => None,
+                        crate::source_dependencies::SelectorType::NoSelector => None,
                     })
                     .map(|prefix| ScalaClassImportRequest {
                         class_name: format!("{}.{}", prefix, e.class_name),

@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     arr.join(",")
                 }
                 SelectorType::WildcardSelector() => "*".to_string(),
-                SelectorType::NoSelector() => "".to_string(),
+                SelectorType::NoSelector => "".to_string(),
             };
             println!(
                 "{}\t{}\t{}",

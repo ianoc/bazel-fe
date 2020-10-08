@@ -28,7 +28,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum SelectorType {
     SelectorList(Vec<(String, Option<String>)>),
     WildcardSelector(),
-    NoSelector(),
+    NoSelector,
 }
 #[derive(Debug, PartialEq)]
 pub struct Import {

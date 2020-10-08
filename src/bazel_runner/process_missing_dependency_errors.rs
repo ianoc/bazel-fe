@@ -51,7 +51,7 @@ fn get_candidates_for_class_name(
             Some(forbidden_targets) => {
                 results = results
                     .into_iter()
-                    .filter(|(freq, target)| !forbidden_targets.contains(target))
+                    .filter(|(_, target)| !forbidden_targets.contains(target))
                     .collect();
             }
         },
@@ -127,7 +127,11 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
 
                     // otherwise... add the dependency with buildozer here
                     // then add it ot the local seen dependencies
-                    log::info!("Calling buildozer for: {:?}", target_name);
+                    log::info!(
+                        "Buildozer action: add dependency {:?} to {:?}",
+                        target_name,
+                        error_info.label
+                    );
                     buildozer
                         .add_dependency(&error_info.label, &target_name)
                         .await
@@ -151,6 +155,8 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -189,5 +195,17 @@ mod tests {
                 (0, String::from("//src/main/java/com/example/a/b/c:c"))
             ]
         );
+    }
+
+    #[test]
+    fn test_is_potentially_valid_target() {
+        assert_eq!(is_potentially_valid_target("@foo/bar/baz"), true);
+
+        assert_eq!(is_potentially_valid_target("//foo/bar/foo"), false);
+
+        let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        d.push("resources/tests/bazel/sample_build");
+        let built_path = format!("//{}", d.to_str().unwrap());
+        assert_eq!(is_potentially_valid_target(&built_path), true);
     }
 }

@@ -33,7 +33,7 @@ pub fn parse_import(line_number: u32, input: &str) -> IResult<&str, Import> {
     )(input)?;
 
     let selector = if opt_wildcard.is_none() {
-        SelectorType::NoSelector()
+        SelectorType::NoSelector
     } else {
         SelectorType::WildcardSelector()
     };
@@ -84,7 +84,7 @@ fn extract_package_from_file(file_lines: &str) -> Result<Option<&str>> {
 // PUBLIC METHODS
 pub fn parse_imports(input: &str) -> Result<Vec<Import>> {
     let mut results_vec = Vec::new();
-    let mut line_number = 0;
+    let mut line_number = 1;
     let mut remaining_input = input;
     while remaining_input.len() > 3 {
         match eat_till_end_of_line(remaining_input) {
@@ -189,9 +189,9 @@ mod tests {
     fn parse_simple_input() {
         let sample_input = "import com.twitter.scalding.RichDate;";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twitter.scalding.RichDate".to_string(),
-            suffix: SelectorType::NoSelector(),
+            suffix: SelectorType::NoSelector,
         }];
 
         let parsed_result = parse_imports(sample_input).unwrap();
@@ -208,19 +208,19 @@ mod tests {
         ";
         let expected_results = vec![
             Import {
-                line_number: 1,
-                prefix_section: "com.twitter.scalding.RichDate".to_string(),
-                suffix: SelectorType::NoSelector(),
-            },
-            Import {
                 line_number: 2,
                 prefix_section: "com.twitter.scalding.RichDate".to_string(),
-                suffix: SelectorType::NoSelector(),
+                suffix: SelectorType::NoSelector,
             },
             Import {
-                line_number: 4,
+                line_number: 3,
                 prefix_section: "com.twitter.scalding.RichDate".to_string(),
-                suffix: SelectorType::NoSelector(),
+                suffix: SelectorType::NoSelector,
+            },
+            Import {
+                line_number: 5,
+                prefix_section: "com.twitter.scalding.RichDate".to_string(),
+                suffix: SelectorType::NoSelector,
             },
         ];
 
@@ -232,7 +232,7 @@ mod tests {
     fn test_wildcard() {
         let sample_input = "import com.twitter.scalding.*;";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twitter.scalding".to_string(),
             suffix: SelectorType::WildcardSelector(),
         }];
@@ -245,9 +245,9 @@ mod tests {
     fn test_underscores() {
         let sample_input = "import com.twit__ter.scalding.My_Richness;";
         let expected_results = vec![Import {
-            line_number: 0,
+            line_number: 1,
             prefix_section: "com.twit__ter.scalding.My_Richness".to_string(),
-            suffix: SelectorType::NoSelector(),
+            suffix: SelectorType::NoSelector,
         }];
 
         let parsed_result = parse_imports(sample_input).unwrap();

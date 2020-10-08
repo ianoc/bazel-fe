@@ -37,8 +37,9 @@ where
             digit1,
             tag(":"),
             take_while1(|chr| chr != ',' && chr != '\r' && chr != '\n'),
+            opt(tag(",")),
         )),
-        |(freq, _, target)| {
+        |(freq, _, target, _)| {
             let f: &str = freq;
             (f.parse::<u16>().unwrap(), target)
         },
@@ -106,6 +107,29 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_troublesome_line() {
+        assert_eq!(
+            run_parse_index_line(
+                "javax.annotation.Nullable\t236:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305,75:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations"
+            )
+            .unwrap()
+            .1,
+            (
+                String::from("javax.annotation.Nullable"),
+                vec![(
+                    236,
+                    String::from("@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305")
+                ),
+                (
+                    75,
+                    String::from("@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations"),
+                ),
+                ]
+            )
+        );
+    }
+
+    #[test]
     fn parse_multiple_lines() {
         let parsed_file = parse_file(
             "scala.reflect.internal.SymbolPairs.Cursor.anon.1\t1:@third_party_jvm//3rdparty/jvm/org/scala_lang:scala_reflect
@@ -128,7 +152,13 @@ org.bouncycastle.util.CollectionStor\t10:@third_party_jvm//3rdparty/jvm/org/boun
 org.apache.avro.io.parsing.JsonGrammarGenerator$1\t0:@third_party_jvm//3rdparty/jvm/org/apache/avro:avro
 org.terracotta.statistics.util\t0:@third_party_jvm//3rdparty/jvm/org/ehcache:ehcache
 com.ibm.icu.impl.Normalizer2Impl$1\t1:@third_party_jvm//3rdparty/jvm/com/ibm/icu:icu4j
-org.eclipse.jetty.io.ByteBufferPool.Bucket\t0:@third_party_jvm//3rdparty/jvm/org/eclipse"
+org.eclipse.jetty.io.ByteBufferPool.Bucket\t0:@third_party_jvm//3rdparty/jvm/org/eclipse
+javax.annotation.Nonnull$Checker\t236:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305,75:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations
+javax.annotation.Nonnull.Checker\t236:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305,75:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations
+javax.annotation.Nullable\t236:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305,75:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations
+javax.annotation.OverridingMethodsMustInvokeSuper\t236:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305,75:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations
+javax.annotation.ParametersAreNonnullByDefault\t236:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305,75:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations
+javax.annotation.ParametersAreNullableByDefault\t236:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305,75:@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations"
         ).unwrap();
 
         assert_eq!(
@@ -139,6 +169,22 @@ org.eclipse.jetty.io.ByteBufferPool.Bucket\t0:@third_party_jvm//3rdparty/jvm/org
                     "@third_party_jvm//3rdparty/jvm/org/apache/parquet:parquet_thrift_jar_tests"
                 )
             )])
+        );
+
+        assert_eq!(
+            parsed_file.get("javax.annotation.Nullable"),
+            Some(&vec![
+                (
+                    236,
+                    String::from("@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:jsr305")
+                ),
+                (
+                    75,
+                    String::from(
+                        "@third_party_jvm//3rdparty/jvm/com/google/code/findbugs:annotations"
+                    ),
+                ),
+            ])
         );
     }
 }
