@@ -8,6 +8,7 @@ pub struct ClassImportRequest {
     pub priority: u32,
 }
 
+pub mod java;
 pub mod scala;
 
 pub fn extract_errors(
@@ -19,6 +20,8 @@ pub fn extract_errors(
         Some(kind) => match kind.as_ref() {
             "scala_library" => scala::extract_errors(input),
             "scala_test" => scala::extract_errors(input),
+            "java_library" => java::extract_errors(input),
+            "java_test" => java::extract_errors(input),
             _ => None,
         },
     }

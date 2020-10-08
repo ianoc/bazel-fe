@@ -202,7 +202,7 @@ pub fn build_bazel_build_events_service() -> (
     Arc<Mutex<Option<broadcast::Sender<BuildEventAction<bazel_event::BazelBuildEvent>>>>>,
     broadcast::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
 ) {
-    let (tx, rx) = broadcast::channel(2048);
+    let (tx, rx) = broadcast::channel(256);
     let write_channel_arc = Arc::new(Mutex::new(Some(tx)));
     let server_instance = BuildEventService {
         write_channel: Arc::clone(&write_channel_arc),
@@ -248,7 +248,6 @@ where
                 match inbound_evt.ordered_build_event.as_ref() {
                     Some(build_event) => {
                         let sequence_number = build_event.sequence_number;
-                    let stream_id = build_event.stream_id.clone();
                     yield PublishBuildToolEventStreamResponse {
                         stream_id: build_event.stream_id.clone(),
                         sequence_number: sequence_number

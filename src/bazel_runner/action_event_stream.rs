@@ -37,7 +37,7 @@ fn output_error_paths(err_data: &error_type_extractor::ErrorInfo) -> Vec<std::pa
                     let u: PathBuf = e.strip_prefix("file://").unwrap().into();
                     Some(u)
                 } else {
-                    println!("Path isn't a file, so skipping...{:?}", e);
+                    warn!("Path isn't a file, so skipping...{:?}", e);
 
                     None
                 }

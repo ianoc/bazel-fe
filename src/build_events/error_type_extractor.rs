@@ -58,6 +58,7 @@ impl ErrorInfo {
                                 tx.send(Some(err_info)).await.unwrap();
                             }
                         }
+
                         bazel_event::Evt::TestFailure(tfe) => {
                             let err_info = ErrorInfo {
                                 output_files: tfe.failed_files,

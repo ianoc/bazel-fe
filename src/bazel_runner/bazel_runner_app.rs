@@ -135,14 +135,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut attempts: u16 = 0;
 
+    let mut final_exit_code = 0;
     while attempts < 5 {
         let (actions_corrected, bazel_result) =
             spawn_bazel_attempt(&sender_arc, &aes, bes_port, &passthrough_args).await;
         if bazel_result.exit_code == 0 || actions_corrected == 0 {
+            final_exit_code = bazel_result.exit_code;
             break;
         }
         attempts += 1;
     }
 
-    Ok(())
+    std::process::exit(final_exit_code);
 }
