@@ -18,6 +18,7 @@ use bazelfe::buildozer_driver;
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
 use rand::Rng;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::{broadcast, Mutex};
 
 #[derive(Clap, Debug)]
@@ -59,6 +60,9 @@ where
 
     let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
 
+    let (stdout_tx, stdout_rx) = mpsc::channel(1024);
+    let (stderr_tx, stderr_rx) = mpsc::channel(1024);
+
     let actions_completed: Arc<std::sync::atomic::AtomicU32> =
         Arc::new(std::sync::atomic::AtomicU32::new(0));
 
@@ -73,7 +77,8 @@ where
             }
         }
     });
-    let res = bazel_runner::execute_bazel(passthrough_args.clone(), bes_port).await;
+    let res =
+        bazel_runner::execute_bazel(passthrough_args.clone(), bes_port, stdout_tx, stderr_tx).await;
 
     info!("Bazel completed with state: {:?}", res);
     let _ = {

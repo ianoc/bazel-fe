@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::io::BufRead;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -8,8 +9,10 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::timeout;
 
 use tokio::process::Command;
+use tokio::sync::mpsc;
 
 static sub_process_pid: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+use std::collections::VecDeque;
 
 pub fn register_ctrlc_handler() {
     ctrlc::set_handler(move || {
@@ -79,6 +82,29 @@ fn update_command<S: Into<String> + Clone>(
     )
 }
 
+fn maybe_line(lines_buf: &mut VecDeque<u8>) -> Vec<String> {
+    let mut res = Vec::new();
+
+    let mut do_continue = true;
+    while do_continue {
+        do_continue = false;
+        let mut idx = 0;
+        while idx < lines_buf.len() {
+            if lines_buf[idx] == b'\n' {
+                do_continue = true;
+                break;
+            }
+            idx += 1;
+        }
+        if do_continue == true {
+            let segment = lines_buf.drain(..idx);
+            res.push(String::from_utf8(segment.collect()).unwrap());
+            lines_buf.pop_front();
+        }
+    }
+    res
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct ExecuteResult {
     pub exit_code: i32,
@@ -87,6 +113,8 @@ pub struct ExecuteResult {
 pub async fn execute_bazel<S: Into<String> + Clone>(
     command: Vec<S>,
     bes_port: u16,
+    stdout_tx: mpsc::Sender<Vec<String>>,
+    stderr_tx: mpsc::Sender<Vec<String>>,
 ) -> ExecuteResult {
     let application: OsString = command
         .first()
@@ -123,24 +151,56 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
     let mut child_stdout = child.stdout.take().expect("Child didn't have a stdout");
 
     tokio::spawn(async move {
+        let mut stdout_tx = stdout_tx;
         let mut bytes_read = 1;
         let mut buffer = [0; 1024];
         let mut stdout = tokio::io::stdout();
+        let mut lines_buf = VecDeque::new();
+
         while bytes_read > 0 {
             bytes_read = child_stdout.read(&mut buffer[..]).await.unwrap();
-            stdout.write_all(&buffer[0..bytes_read]).await.unwrap()
+            stdout.write_all(&buffer[0..bytes_read]).await.unwrap();
+            lines_buf.extend(&buffer[0..bytes_read]);
+            let lines = maybe_line(&mut lines_buf);
+            if lines.len() > 0 {
+                stdout_tx.send(lines).await.unwrap();
+            }
+        }
+        if lines_buf.len() > 0 {
+            stdout_tx
+                .send(vec![
+                    String::from_utf8(lines_buf.into_iter().collect()).unwrap()
+                ])
+                .await
+                .unwrap();
         }
     });
 
     let mut child_stderr = child.stderr.take().expect("Child didn't have a stderr");
 
     tokio::spawn(async move {
+        let mut stderr_tx = stderr_tx;
         let mut bytes_read = 1;
         let mut buffer = [0; 1024];
         let mut stderr = tokio::io::stderr();
+        let mut lines_buf = VecDeque::new();
         while bytes_read > 0 {
             bytes_read = child_stderr.read(&mut buffer[..]).await.unwrap();
-            stderr.write_all(&buffer[0..bytes_read]).await.unwrap()
+            stderr.write_all(&buffer[0..bytes_read]).await.unwrap();
+            lines_buf.extend(&buffer[0..bytes_read]);
+
+            let lines = maybe_line(&mut lines_buf);
+            if lines.len() > 0 {
+                stderr_tx.send(lines).await.unwrap();
+            }
+        }
+        if lines_buf.len() > 0 {
+            stderr_tx
+                .send(vec![
+                    String::from_utf8(lines_buf.into_iter().collect()).unwrap()
+                ])
+                .await
+                .unwrap();
         }
     });
     let result = child.await.expect("The command wasn't running");
