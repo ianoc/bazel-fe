@@ -1,19 +1,22 @@
+use crate::protos::*;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
+    path::PathBuf,
 };
 
 use lazy_static::lazy_static;
 
 use crate::{
-    build_events::error_type_extractor::ErrorInfo, buildozer_driver::Buildozer, error_extraction,
-    index_table,
+    build_events::error_type_extractor::ActionFailedErrorInfo, buildozer_driver::Buildozer,
+    error_extraction, index_table,
 };
 
+use dashmap::DashSet;
 use log;
 
 fn get_candidates_for_class_name(
-    error_info: &ErrorInfo,
+    error_info: &ActionFailedErrorInfo,
     class_name: &str,
     index_table: &index_table::IndexTable,
 ) -> Vec<(u16, String)> {
@@ -79,49 +82,102 @@ pub fn is_potentially_valid_target(label: &str) -> bool {
     }
 }
 
-pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Sync + 'static>(
-    candidate_import_requests: Vec<error_extraction::ClassImportRequest>,
-    global_previous_seen: HashSet<String>,
-    buildozer: T,
-    error_info: &ErrorInfo,
-    index_table: &index_table::IndexTable,
-) -> (HashSet<String>, u32) {
-    let mut local_previous_seen: HashSet<String> = HashSet::new();
+fn output_error_paths(err_data: &ActionFailedErrorInfo) -> Vec<std::path::PathBuf> {
+    err_data
+        .output_files
+        .iter()
+        .flat_map(|e| match e {
+            build_event_stream::file::File::Uri(e) => {
+                if e.starts_with("file://") {
+                    let u: PathBuf = e.strip_prefix("file://").unwrap().into();
+                    Some(u)
+                } else {
+                    warn!("Path isn't a file, so skipping...{:?}", e);
 
-    let mut candidate_import_requests =
+                    None
+                }
+            }
+            build_event_stream::file::File::Contents(_) => None,
+        })
+        .collect()
+}
+
+async fn path_to_import_requests(
+    error_info: &ActionFailedErrorInfo,
+    path_to_use: &PathBuf,
+) -> Option<Vec<error_extraction::ClassImportRequest>> {
+    let loaded_path = tokio::fs::read_to_string(path_to_use).await.unwrap();
+
+    error_extraction::extract_errors(&error_info.target_kind, &loaded_path)
+}
+
+pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Sync + 'static>(
+    global_previous_seen: &DashSet<String>,
+    buildozer: T,
+    action_failed_error_info: &ActionFailedErrorInfo,
+    index_table: &index_table::IndexTable,
+) -> u32 {
+    let mut candidate_import_requests: Vec<error_extraction::ClassImportRequest> = vec![];
+    for path in output_error_paths(&action_failed_error_info).into_iter() {
+        if let Some(mut vec) =
+            path_to_import_requests(&action_failed_error_info, &path.into()).await
+        {
+            candidate_import_requests.append(&mut vec);
+        }
+    }
+
+    if candidate_import_requests.len() == 0 {
+        return 0;
+    }
+    let mut local_previous_seen: HashSet<String> = HashSet::new();
+    debug!("Candidates: {:#?}", candidate_import_requests);
+
+    let candidate_import_requests =
         super::sanitization_tools::expand_candidate_import_requests(candidate_import_requests);
 
-    let mut ignore_dep_referneces: HashSet<String> = {
+    let ignore_dep_references: HashSet<String> = {
         let mut to_ignore = HashSet::new();
-        let d = buildozer.print_deps(&error_info.label).await.unwrap();
+        let d = buildozer
+            .print_deps(&action_failed_error_info.label)
+            .await
+            .unwrap();
         d.into_iter().for_each(|dep| {
             to_ignore.insert(super::sanitization_tools::sanitize_label(dep));
         });
 
-        global_previous_seen.into_iter().for_each(|dep| {
-            to_ignore.insert(super::sanitization_tools::sanitize_label(dep));
+        global_previous_seen.iter().for_each(|dep| {
+            to_ignore.insert(super::sanitization_tools::sanitize_label(dep.to_string()));
         });
 
         to_ignore.insert(super::sanitization_tools::sanitize_label(
-            error_info.label.clone(),
+            action_failed_error_info.label.clone(),
         ));
+
+        global_previous_seen.insert(super::sanitization_tools::sanitize_label(
+            action_failed_error_info.label.clone(),
+        ));
+
         to_ignore
     };
 
     let mut actions_completed: u32 = 0;
-    log::debug!("ignore_dep_references: {:?}", ignore_dep_referneces);
+    log::debug!("ignore_dep_references: {:?}", ignore_dep_references);
     for (_, inner_versions) in candidate_import_requests.into_iter() {
         'class_entry_loop: for class_name in inner_versions {
             let candidates: Vec<(u16, String)> =
-                get_candidates_for_class_name(&error_info, &class_name, &index_table);
-            log::debug!("Candidates: {:?}", candidates);
+                get_candidates_for_class_name(action_failed_error_info, &class_name, &index_table);
+            debug!(
+                "Candidates for class name: {:?} : {:#?}",
+                class_name, candidates
+            );
             for (_, target_name) in candidates {
-                if !ignore_dep_referneces.contains(&target_name)
+                if !ignore_dep_references.contains(&target_name)
                     && is_potentially_valid_target(&target_name)
                 {
+                    warn!("Potentially valid target: {:?}", target_name);
                     // If our top candidate hits to be a local previous seen stop
                     // processing this class
-                    if (local_previous_seen.contains(&target_name)) {
+                    if local_previous_seen.contains(&target_name) {
                         break 'class_entry_loop;
                     }
 
@@ -130,10 +186,10 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
                     log::info!(
                         "Buildozer action: add dependency {:?} to {:?}",
                         target_name,
-                        error_info.label
+                        action_failed_error_info.label
                     );
                     buildozer
-                        .add_dependency(&error_info.label, &target_name)
+                        .add_dependency(&action_failed_error_info.label, &target_name)
                         .await
                         .unwrap();
                     actions_completed += 1;
@@ -149,8 +205,11 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
 
     // concat the global perm ignore with the local_previous seen data
     // this becomes our next global ignore for this target
-    ignore_dep_referneces.extend(local_previous_seen);
-    (ignore_dep_referneces, actions_completed)
+    for e in local_previous_seen.into_iter() {
+        global_previous_seen.insert(e);
+    }
+
+    actions_completed
 }
 
 #[cfg(test)]
@@ -168,7 +227,7 @@ mod tests {
         );
         let index_table = index_table::IndexTable::from_hashmap(tbl_map);
 
-        let error_info = ErrorInfo {
+        let error_info = ActionFailedErrorInfo {
             label: String::from("//src/main/foo/asd/we:wer"),
             output_files: vec![],
             target_kind: Some(String::from("scala_library")),

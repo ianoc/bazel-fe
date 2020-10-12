@@ -25,7 +25,6 @@ pub mod bazel_event {
         pub fn transform_from(
             inbound_evt: &mut PublishBuildToolEventStreamRequest,
         ) -> Option<BazelBuildEvent> {
-            info!("Transformation function started");
             let mut inner_data = inbound_evt
                 .ordered_build_event
                 .take()
@@ -64,6 +63,47 @@ pub mod bazel_event {
                                 })
                             })
                         };
+
+                        let aborted: Option<Evt> = {
+                            let abort_info = v.payload.as_ref().and_then(|e| match e {
+                                build_event_stream::build_event::Payload::Aborted(cfg) => Some((
+                                    build_event_stream::aborted::AbortReason::from_i32(cfg.reason),
+                                    cfg.description.clone(),
+                                )),
+                                _ => None,
+                            });
+                            let target_label_opt =
+                                v.id.as_ref()
+                                    .and_then(|e| e.id.as_ref())
+                                    .and_then(|e| match e {
+                                        build_event_stream::build_event_id::Id::ConfiguredLabel(
+                                            configured_label_id,
+                                        ) => Some(configured_label_id.label.clone()),
+                                        _ => None,
+                                    });
+
+                            abort_info.map(|(reason, description)| {
+                                Evt::Aborted(AbortedEvt {
+                                    label: target_label_opt,
+                                    reason: reason,
+                                    description: description,
+                                })
+                            })
+                        };
+
+                        let progress_info: Option<Evt> = v.payload.as_ref().and_then(|e| match e {
+                            build_event_stream::build_event::Payload::Progress(cfg) => {
+                                if cfg.stdout.is_empty() && cfg.stderr.is_empty() {
+                                    None
+                                } else {
+                                    Some(Evt::Progress(ProgressEvt {
+                                        stdout: cfg.stdout.clone(),
+                                        stderr: cfg.stderr.clone(),
+                                    }))
+                                }
+                            }
+                            _ => None,
+                        });
 
                         let error_info: Option<Evt> = {
                             let label_name_opt = v.payload.as_ref().and_then(|e| match e {
@@ -131,10 +171,16 @@ pub mod bazel_event {
                         };
 
                         if let Some(e) = target_configured_evt {
+                            println!("e: {:?}", e);
+
                             Evt::TargetConfigured(e)
                         } else if let Some(e) = error_info {
                             e
                         } else if let Some(e) = test_outputs {
+                            e
+                        } else if let Some(e) = aborted {
+                            e
+                        } else if let Some(e) = progress_info {
                             e
                         } else {
                             Evt::BazelEvent(v)
@@ -156,6 +202,20 @@ pub mod bazel_event {
         pub stdout: Option<build_event_stream::file::File>,
         pub stderr: Option<build_event_stream::file::File>,
     }
+
+    #[derive(Clone, PartialEq, Debug)]
+    pub struct AbortedEvt {
+        pub label: Option<String>,
+        pub reason: Option<build_event_stream::aborted::AbortReason>,
+        pub description: String,
+    }
+
+    #[derive(Clone, PartialEq, Debug)]
+    pub struct ProgressEvt {
+        pub stdout: String,
+        pub stderr: String,
+    }
+
     #[derive(Clone, PartialEq, Debug)]
     pub struct TestFailureEvt {
         pub label: String,
@@ -173,6 +233,8 @@ pub mod bazel_event {
         TargetConfigured(TargetConfiguredEvt),
         ActionCompleted(ActionCompletedEvt),
         TestFailure(TestFailureEvt),
+        Progress(ProgressEvt),
+        Aborted(AbortedEvt),
         UnknownEvent(String),
     }
 }
@@ -231,19 +293,17 @@ where
     ) -> Result<Response<Self::PublishBuildToolEventStreamStream>, Status> {
         let mut stream = request.into_inner();
 
-        let mut sender_ref = {
+        let sender_ref = {
             let e = Arc::clone(&self.write_channel);
             let m = e.lock().await;
             (*m).clone()
         };
-        let mut cloned_v = sender_ref.clone();
-        let mut second_writer = sender_ref.clone();
+        let cloned_v = sender_ref.clone();
+        let second_writer = sender_ref.clone();
         let transform_fn = Arc::clone(&self.transform_fn);
         let output = async_stream::try_stream! {
             while let Some(inbound_evt) = stream.next().await {
                 let mut inbound_evt = inbound_evt?;
-            //     // info!("Starting to process event...{:?}", inbound_evt);
-            //     info!("Printed out data");
 
                 match inbound_evt.ordered_build_event.as_ref() {
                     Some(build_event) => {
@@ -256,7 +316,6 @@ where
             }
                     None => ()
                 };
-                info!("Calling transform");
                 let transformed_data = (transform_fn)(&mut inbound_evt);
 
                 if let Some(r) = transformed_data {
@@ -272,7 +331,6 @@ where
                         });
                     }
                 }
-            //     info!("Finished to process event...");
             }
 
 
@@ -522,10 +580,10 @@ mod tests {
             assert_eq!(data_stream[80], expected);
         }
         let mut idx = 0;
-        for e in data_stream {
-            println!("{} -> {:?}", idx, e);
-            idx = idx + 1;
-        }
+        // for e in data_stream {
+        //     println!("{} -> {:?}", idx, e);
+        //     idx = idx + 1;
+        // }
         // assert_eq!(3, 5);
         // assert_eq!(event_stream, data_stream);
     }

@@ -28,6 +28,7 @@ bytes = "0.5.6"
 ctrlc = "3.1.6"
 async-trait = "0.1.41"
 env_logger = "0.7.1"
+dashmap = "3.11.10"
 
 [dev-dependencies]
 tempfile = "3.1.0"

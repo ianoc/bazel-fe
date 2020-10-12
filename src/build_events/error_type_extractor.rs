@@ -16,10 +16,28 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct ErrorInfo {
+pub struct ActionFailedErrorInfo {
     pub label: String,
     pub output_files: Vec<build_event_stream::file::File>,
     pub target_kind: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct BazelAbortErrorInfo {
+    pub label: Option<String>,
+    pub reason: Option<build_event_stream::aborted::AbortReason>,
+    pub description: String,
+}
+
+//May or may not contain error info not reflected elsewhere?
+
+// Broad strokes of the failure occured inside an action (most common)
+// or at a bazel abort, things like mis-configured build files
+#[derive(Clone, PartialEq, Debug)]
+pub enum ErrorInfo {
+    BazelAbort(BazelAbortErrorInfo),
+    ActionFailed(ActionFailedErrorInfo),
+    Progress(bazel_event::ProgressEvt),
 }
 
 impl ErrorInfo {
@@ -44,7 +62,7 @@ impl ErrorInfo {
                         }
                         bazel_event::Evt::ActionCompleted(ace) => {
                             if !ace.success {
-                                let err_info = ErrorInfo {
+                                let err_info = ActionFailedErrorInfo {
                                     output_files: ace
                                         .stdout
                                         .into_iter()
@@ -55,17 +73,34 @@ impl ErrorInfo {
                                         .map(|e| e.clone()),
                                     label: ace.label,
                                 };
-                                tx.send(Some(err_info)).await.unwrap();
+                                tx.send(Some(ErrorInfo::ActionFailed(err_info)))
+                                    .await
+                                    .unwrap();
                             }
                         }
 
                         bazel_event::Evt::TestFailure(tfe) => {
-                            let err_info = ErrorInfo {
+                            let err_info = ActionFailedErrorInfo {
                                 output_files: tfe.failed_files,
                                 target_kind: rule_kind_lookup.get(&tfe.label).map(|e| e.clone()),
                                 label: tfe.label,
                             };
-                            tx.send(Some(err_info)).await.unwrap();
+                            tx.send(Some(ErrorInfo::ActionFailed(err_info)))
+                                .await
+                                .unwrap();
+                        }
+                        bazel_event::Evt::Progress(progress) => {
+                            tx.send(Some(ErrorInfo::Progress(progress))).await.unwrap();
+                        }
+                        bazel_event::Evt::Aborted(tfe) => {
+                            let err_info = BazelAbortErrorInfo {
+                                reason: tfe.reason,
+                                description: tfe.description,
+                                label: tfe.label,
+                            };
+                            tx.send(Some(ErrorInfo::BazelAbort(err_info)))
+                                .await
+                                .unwrap();
                         }
                         bazel_event::Evt::UnknownEvent(_) => (),
                     },
@@ -100,11 +135,11 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo {
+            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: None,
                 label: String::from("foo_bar_baz"),
                 output_files: vec![]
-            })
+            }))
         );
     }
 
@@ -131,14 +166,14 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo {
+            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: None,
                 label: String::from("foo_bar_baz"),
                 output_files: vec![
                     build_event_stream::file::File::Uri(String::from("path-to-stdout",)),
                     build_event_stream::file::File::Uri(String::from("path-to-stderr",))
                 ]
-            })
+            }))
         );
     }
 
@@ -173,14 +208,14 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo {
+            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: Some(String::from("my_madeup_rule")),
                 label: String::from("foo_bar_baz"),
                 output_files: vec![
                     build_event_stream::file::File::Uri(String::from("path-to-stdout",)),
                     build_event_stream::file::File::Uri(String::from("path-to-stderr",))
                 ]
-            })
+            }))
         );
     }
 
@@ -222,14 +257,14 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo {
+            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: None,
                 label: String::from("foo_bar_baz"),
                 output_files: vec![
                     build_event_stream::file::File::Uri(String::from("path-to-stdout",)),
                     build_event_stream::file::File::Uri(String::from("path-to-stderr",))
                 ]
-            })
+            }))
         );
     }
 }

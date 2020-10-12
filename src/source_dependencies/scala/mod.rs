@@ -70,7 +70,7 @@ where
             |r| SelectorType::SelectorList(r.4),
         ),
         map(tuple((multispace0, tag("._"))), |_| {
-            SelectorType::WildcardSelector()
+            SelectorType::WildcardSelector
         }),
         map(tuple((space0, is_not("."))), |_| SelectorType::NoSelector),
     ))
@@ -313,7 +313,7 @@ mod tests {
         let expected_results = vec![Import {
             line_number: 1,
             prefix_section: "com.twitter.scalding".to_string(),
-            suffix: SelectorType::WildcardSelector(),
+            suffix: SelectorType::WildcardSelector,
         }];
 
         let parsed_result = parse_imports(sample_input).unwrap();

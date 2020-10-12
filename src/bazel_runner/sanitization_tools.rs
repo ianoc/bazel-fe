@@ -57,8 +57,7 @@ pub(in crate::bazel_runner) fn prepare_class_import_requests(
         }
 
         if found {
-            let val = class_import_requests.remove(i);
-        // your code here
+            class_import_requests.remove(i);
         } else {
             i += 1;
         }

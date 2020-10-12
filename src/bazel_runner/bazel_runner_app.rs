@@ -2,7 +2,7 @@
 extern crate log;
 
 use clap::{AppSettings, Clap};
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use std::env;
 use std::sync::atomic::Ordering;
@@ -18,7 +18,6 @@ use bazelfe::buildozer_driver;
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
 use rand::Rng;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::sync::{broadcast, Mutex};
 
 #[derive(Clap, Debug)]
@@ -60,9 +59,6 @@ where
 
     let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
 
-    let (stdout_tx, stdout_rx) = mpsc::channel(1024);
-    let (stderr_tx, stderr_rx) = mpsc::channel(1024);
-
     let actions_completed: Arc<std::sync::atomic::AtomicU32> =
         Arc::new(std::sync::atomic::AtomicU32::new(0));
 
@@ -77,8 +73,7 @@ where
             }
         }
     });
-    let res =
-        bazel_runner::execute_bazel(passthrough_args.clone(), bes_port, stdout_tx, stderr_tx).await;
+    let res = bazel_runner::execute_bazel(passthrough_args.clone(), bes_port).await;
 
     info!("Bazel completed with state: {:?}", res);
     let _ = {
@@ -141,15 +136,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut attempts: u16 = 0;
 
     let mut final_exit_code = 0;
-    while attempts < 5 {
+    while attempts < 15 {
         let (actions_corrected, bazel_result) =
             spawn_bazel_attempt(&sender_arc, &aes, bes_port, &passthrough_args).await;
+        final_exit_code = bazel_result.exit_code;
         if bazel_result.exit_code == 0 || actions_corrected == 0 {
-            final_exit_code = bazel_result.exit_code;
             break;
         }
         attempts += 1;
     }
 
+    println!("Attempts/build cycles: {:?}", attempts);
     std::process::exit(final_exit_code);
 }

@@ -1,8 +1,6 @@
 use clap::Clap;
 use std::error::Error;
-use std::fs;
 use std::path::PathBuf;
-use tokio::prelude::*;
 
 use bazelfe::buildozer_driver::{from_binary_path, Buildozer};
 

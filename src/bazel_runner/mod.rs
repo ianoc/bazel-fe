@@ -1,29 +1,23 @@
 use std::ffi::OsString;
-use std::io::BufRead;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::Ordering;
 use tokio::io::AsyncReadExt;
-use tokio::io::{self, AsyncWriteExt};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::time::timeout;
+use tokio::io::AsyncWriteExt;
 
 use tokio::process::Command;
-use tokio::sync::mpsc;
 
-static sub_process_pid: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-use std::collections::VecDeque;
+static SUB_PROCESS_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub fn register_ctrlc_handler() {
     ctrlc::set_handler(move || {
-        let current_sub_process_pid: u32 = sub_process_pid.load(Ordering::SeqCst);
-        info!("Received ctrl-c, state: {:?}", sub_process_pid);
+        let current_sub_process_pid: u32 = SUB_PROCESS_PID.load(Ordering::SeqCst);
+        info!("Received ctrl-c, state: {:?}", current_sub_process_pid);
 
         // no subprocess_pid
-        if (current_sub_process_pid == 0) {
+        if current_sub_process_pid == 0 {
             info!(
                 "Shutting down via ctrl-c, sub_process_pid: {:?}",
-                sub_process_pid
+                current_sub_process_pid
             );
             std::process::exit(137);
         }
@@ -82,29 +76,6 @@ fn update_command<S: Into<String> + Clone>(
     )
 }
 
-fn maybe_line(lines_buf: &mut VecDeque<u8>) -> Vec<String> {
-    let mut res = Vec::new();
-
-    let mut do_continue = true;
-    while do_continue {
-        do_continue = false;
-        let mut idx = 0;
-        while idx < lines_buf.len() {
-            if lines_buf[idx] == b'\n' {
-                do_continue = true;
-                break;
-            }
-            idx += 1;
-        }
-        if do_continue == true {
-            let segment = lines_buf.drain(..idx);
-            res.push(String::from_utf8(segment.collect()).unwrap());
-            lines_buf.pop_front();
-        }
-    }
-    res
-}
-
 #[derive(Clone, PartialEq, Debug)]
 pub struct ExecuteResult {
     pub exit_code: i32,
@@ -113,8 +84,6 @@ pub struct ExecuteResult {
 pub async fn execute_bazel<S: Into<String> + Clone>(
     command: Vec<S>,
     bes_port: u16,
-    stdout_tx: mpsc::Sender<Vec<String>>,
-    stderr_tx: mpsc::Sender<Vec<String>>,
 ) -> ExecuteResult {
     let application: OsString = command
         .first()
@@ -146,66 +115,35 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
         .stderr(Stdio::piped());
 
     let mut child = cmd.spawn().expect("failed to start bazel process");
-    sub_process_pid.store(child.id(), Ordering::SeqCst);
+    SUB_PROCESS_PID.store(child.id(), Ordering::SeqCst);
 
     let mut child_stdout = child.stdout.take().expect("Child didn't have a stdout");
 
     tokio::spawn(async move {
-        let mut stdout_tx = stdout_tx;
         let mut bytes_read = 1;
         let mut buffer = [0; 1024];
         let mut stdout = tokio::io::stdout();
-        let mut lines_buf = VecDeque::new();
 
         while bytes_read > 0 {
             bytes_read = child_stdout.read(&mut buffer[..]).await.unwrap();
             stdout.write_all(&buffer[0..bytes_read]).await.unwrap();
-            lines_buf.extend(&buffer[0..bytes_read]);
-            let lines = maybe_line(&mut lines_buf);
-            if lines.len() > 0 {
-                stdout_tx.send(lines).await.unwrap();
-            }
-        }
-        if lines_buf.len() > 0 {
-            stdout_tx
-                .send(vec![
-                    String::from_utf8(lines_buf.into_iter().collect()).unwrap()
-                ])
-                .await
-                .unwrap();
         }
     });
 
     let mut child_stderr = child.stderr.take().expect("Child didn't have a stderr");
 
     tokio::spawn(async move {
-        let mut stderr_tx = stderr_tx;
         let mut bytes_read = 1;
         let mut buffer = [0; 1024];
         let mut stderr = tokio::io::stderr();
-        let mut lines_buf = VecDeque::new();
         while bytes_read > 0 {
             bytes_read = child_stderr.read(&mut buffer[..]).await.unwrap();
             stderr.write_all(&buffer[0..bytes_read]).await.unwrap();
-            lines_buf.extend(&buffer[0..bytes_read]);
-
-            let lines = maybe_line(&mut lines_buf);
-            if lines.len() > 0 {
-                stderr_tx.send(lines).await.unwrap();
-            }
-        }
-        if lines_buf.len() > 0 {
-            stderr_tx
-                .send(vec![
-                    String::from_utf8(lines_buf.into_iter().collect()).unwrap()
-                ])
-                .await
-                .unwrap();
         }
     });
     let result = child.await.expect("The command wasn't running");
 
-    sub_process_pid.store(0, Ordering::SeqCst);
+    SUB_PROCESS_PID.store(0, Ordering::SeqCst);
 
     ExecuteResult {
         exit_code: result.code().unwrap_or_else(|| -1),
@@ -214,5 +152,6 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
 }
 pub mod action_event_stream;
 pub mod expand_target_to_guesses;
+pub mod process_build_abort_errors;
 pub mod process_missing_dependency_errors;
 mod sanitization_tools;

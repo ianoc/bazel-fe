@@ -37,6 +37,12 @@ pub trait Buildozer {
         target_to_operate_on: &String,
         label_to_add: &String,
     ) -> Result<()>;
+
+    async fn remove_dependency(
+        &self,
+        target_to_operate_on: &String,
+        label_to_add: &String,
+    ) -> Result<()>;
 }
 
 #[derive(Clone, Debug)]
@@ -131,6 +137,21 @@ impl Buildozer for BuildozerBinaryImpl {
         let _ = self
             .execute_command(vec![
                 &format!("add deps {}", label_to_add),
+                &target_to_operate_on,
+            ])
+            .await?;
+        Ok(())
+    }
+
+    async fn remove_dependency(
+        &self,
+        target_to_operate_on: &String,
+        label_to_add: &String,
+    ) -> Result<()> {
+        // buildozer 'add deps //base' //pkg:rule //pkg:rule2
+        let _ = self
+            .execute_command(vec![
+                &format!("remove deps {}", label_to_add),
                 &target_to_operate_on,
             ])
             .await?;

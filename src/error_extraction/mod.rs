@@ -5,7 +5,7 @@ pub struct ClassImportRequest {
     pub class_name: String,
     pub exact_only: bool,
     pub src_fn: String,
-    pub priority: u32,
+    pub priority: i32,
 }
 
 pub mod java;

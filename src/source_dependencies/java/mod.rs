@@ -35,7 +35,7 @@ pub fn parse_import(line_number: u32, input: &str) -> IResult<&str, Import> {
     let selector = if opt_wildcard.is_none() {
         SelectorType::NoSelector
     } else {
-        SelectorType::WildcardSelector()
+        SelectorType::WildcardSelector
     };
 
     Ok((
@@ -234,7 +234,7 @@ mod tests {
         let expected_results = vec![Import {
             line_number: 1,
             prefix_section: "com.twitter.scalding".to_string(),
-            suffix: SelectorType::WildcardSelector(),
+            suffix: SelectorType::WildcardSelector,
         }];
 
         let parsed_result = parse_imports(sample_input).unwrap();

@@ -15,7 +15,7 @@ pub struct ScalaClassImportRequest {
     pub class_name: String,
     pub exact_only: bool,
     pub src_fn: &'static str,
-    pub priority: u32,
+    pub priority: i32,
 }
 
 impl ScalaClassImportRequest {
@@ -54,7 +54,7 @@ pub fn extract_errors(input: &str) -> Option<Vec<super::ClassImportRequest>> {
     ]
     .into_iter()
     .flat_map(|e| e.into_iter().flat_map(|inner| inner.into_iter()))
-    .flat_map(|mut e| {
+    .flat_map(|e| {
         let cached_file_data = match file_parse_cache.get(&e.src_file_name) {
             Some(content) => Some(content),
             None => match load_file(&e.src_file_name) {
@@ -74,7 +74,7 @@ pub fn extract_errors(input: &str) -> Option<Vec<super::ClassImportRequest>> {
                     .iter()
                     .filter_map(|e| match e.suffix {
                         crate::source_dependencies::SelectorType::SelectorList(_) => None,
-                        crate::source_dependencies::SelectorType::WildcardSelector() => {
+                        crate::source_dependencies::SelectorType::WildcardSelector => {
                             Some(&e.prefix_section)
                         }
                         crate::source_dependencies::SelectorType::NoSelector => None,
