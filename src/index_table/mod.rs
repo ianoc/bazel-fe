@@ -4,7 +4,7 @@ use nom::character::complete::line_ending;
 use nom::error::ParseError;
 use nom::multi::{many0, many1};
 use nom::{bytes::complete::tag, combinator::map, combinator::opt, sequence::tuple, IResult};
-use std::{collections::HashMap, error::Error};
+use std::{collections::HashMap, collections::HashSet, error::Error};
 
 #[derive(Clone, Debug)]
 pub struct IndexTable {
@@ -26,6 +26,22 @@ impl IndexTable {
         S: Into<String>,
     {
         self.tbl_map.get(&key.into())
+    }
+
+    pub fn get_from_suffix<S>(&self, key: S) -> Vec<(u16, String)>
+    where
+        S: Into<String>,
+    {
+        let passed_k = key.into();
+        let mut result: HashSet<(u16, String)> = HashSet::default();
+        for (k, v) in self.tbl_map.iter() {
+            if k.ends_with(&passed_k) {
+                for e in v {
+                    result.insert(e.clone());
+                }
+            }
+        }
+        result.into_iter().collect()
     }
 }
 fn element_extractor<'a, E>() -> impl Fn(&'a str) -> IResult<&str, (u16, &str), E>

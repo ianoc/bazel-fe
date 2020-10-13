@@ -99,6 +99,6 @@ pub fn extract_errors(input: &str) -> Vec<super::ClassImportRequest> {
     combined_vec
 }
 
-pub fn extract_suffix_errors(input: &str) -> Vec<super::ClassSuffixMatch> {
+pub fn extract_suffix_errors(_input: &str) -> Vec<super::ClassSuffixMatch> {
     Vec::new()
 }

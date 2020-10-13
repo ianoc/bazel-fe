@@ -156,34 +156,62 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
 
     let mut actions_completed: u32 = 0;
 
-    let mut candidate_import_requests: Vec<error_extraction::ClassImportRequest> = vec![];
+    let mut prefix_candidate_import_requests: Vec<error_extraction::ClassImportRequest> = vec![];
     let mut suffix_requests: Vec<error_extraction::ClassSuffixMatch> = vec![];
     for path in output_error_paths(&action_failed_error_info).into_iter() {
         path_to_import_requests(
             &action_failed_error_info,
             &path.into(),
-            &mut candidate_import_requests,
+            &mut prefix_candidate_import_requests,
             &mut suffix_requests,
         )
         .await
     }
 
-    if candidate_import_requests.len() == 0 {
+    if prefix_candidate_import_requests.len() == 0 && suffix_requests.len() == 0 {
         return 0;
     }
-    debug!("Candidates: {:#?}", candidate_import_requests);
+    debug!("Prefix Candidates: {:#?}", prefix_candidate_import_requests);
+    #[derive(Debug, PartialEq)]
+    enum Request {
+        Prefix(String),
+        Suffix(error_extraction::ClassSuffixMatch),
+    }
 
-    for (_, inner_versions) in
-        super::sanitization_tools::expand_candidate_import_requests(candidate_import_requests)
+    let all_requests: Vec<Vec<Request>> = Box::new(
+        super::sanitization_tools::expand_candidate_import_requests(
+            prefix_candidate_import_requests,
+        )
+        .into_iter()
+        .map(|(_, inner)| {
+            inner
+                .into_iter()
+                .map(|e| Request::Prefix(e))
+                .collect::<Vec<Request>>()
+        }),
+    )
+    .chain(
+        suffix_requests
             .into_iter()
-    {
-        'class_entry_loop: for class_name in inner_versions {
-            let candidates: Vec<(u16, String)> =
-                get_candidates_for_class_name(action_failed_error_info, &class_name, &index_table);
-            debug!(
-                "Candidates for class name: {:?} : {:#?}",
-                class_name, candidates
-            );
+            .map(|e| vec![Request::Suffix(e)]),
+    )
+    .collect();
+
+    for req in all_requests.into_iter() {
+        'class_entry_loop: for req in req.into_iter() {
+            let candidates: Vec<(u16, String)> = match &req {
+                Request::Prefix(class_name) => get_candidates_for_class_name(
+                    action_failed_error_info,
+                    &class_name,
+                    &index_table,
+                ),
+                Request::Suffix(suffix) => {
+                    let mut r = index_table.get_from_suffix(&suffix.suffix);
+                    r.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                    r
+                }
+            };
+            debug!("Candidates for class name: {:#?} : {:#?}", req, candidates);
             for (_, target_name) in candidates {
                 if !ignore_dep_references.contains(&target_name)
                     && is_potentially_valid_target(&target_name)

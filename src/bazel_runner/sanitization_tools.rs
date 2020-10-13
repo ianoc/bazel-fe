@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use crate::build_events::error_type_extractor;
-
 use super::super::error_extraction;
 use error_extraction::ClassImportRequest;
 pub(in crate::bazel_runner) fn sanitize_label(label: String) -> String {
@@ -91,7 +89,7 @@ fn split_clazz_to_lst(class_name: &str) -> Vec<String> {
 }
 
 pub(in crate::bazel_runner) fn expand_candidate_import_requests(
-    mut candidate_import_requests: Vec<ClassImportRequest>,
+    candidate_import_requests: Vec<ClassImportRequest>,
 ) -> Vec<(ClassImportRequest, Vec<String>)> {
     let mut candidate_import_requests = prepare_class_import_requests(candidate_import_requests);
 

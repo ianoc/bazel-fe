@@ -82,6 +82,7 @@ where
                         if !done_load {
                             let nxt = self_d.clone();
                             nxt.ensure_table_loaded().await;
+                            done_load = true;
                         }
 
                         let e = e.clone();
