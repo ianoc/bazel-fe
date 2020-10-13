@@ -105,10 +105,19 @@ fn output_error_paths(err_data: &ActionFailedErrorInfo) -> Vec<std::path::PathBu
 async fn path_to_import_requests(
     error_info: &ActionFailedErrorInfo,
     path_to_use: &PathBuf,
-) -> Option<Vec<error_extraction::ClassImportRequest>> {
+    candidate_import_requests: &mut Vec<error_extraction::ClassImportRequest>,
+    suffix_requests: &mut Vec<error_extraction::ClassSuffixMatch>,
+) {
     let loaded_path = tokio::fs::read_to_string(path_to_use).await.unwrap();
 
-    error_extraction::extract_errors(&error_info.target_kind, &loaded_path)
+    candidate_import_requests.extend(error_extraction::extract_errors(
+        &error_info.target_kind,
+        &loaded_path,
+    ));
+    suffix_requests.extend(error_extraction::extract_suffix_errors(
+        &error_info.target_kind,
+        &loaded_path,
+    ));
 }
 
 pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Sync + 'static>(
@@ -117,23 +126,7 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
     action_failed_error_info: &ActionFailedErrorInfo,
     index_table: &index_table::IndexTable,
 ) -> u32 {
-    let mut candidate_import_requests: Vec<error_extraction::ClassImportRequest> = vec![];
-    for path in output_error_paths(&action_failed_error_info).into_iter() {
-        if let Some(mut vec) =
-            path_to_import_requests(&action_failed_error_info, &path.into()).await
-        {
-            candidate_import_requests.append(&mut vec);
-        }
-    }
-
-    if candidate_import_requests.len() == 0 {
-        return 0;
-    }
     let mut local_previous_seen: HashSet<String> = HashSet::new();
-    debug!("Candidates: {:#?}", candidate_import_requests);
-
-    let candidate_import_requests =
-        super::sanitization_tools::expand_candidate_import_requests(candidate_import_requests);
 
     let ignore_dep_references: HashSet<String> = {
         let mut to_ignore = HashSet::new();
@@ -159,10 +152,31 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
 
         to_ignore
     };
+    log::debug!("ignore_dep_references: {:?}", ignore_dep_references);
 
     let mut actions_completed: u32 = 0;
-    log::debug!("ignore_dep_references: {:?}", ignore_dep_references);
-    for (_, inner_versions) in candidate_import_requests.into_iter() {
+
+    let mut candidate_import_requests: Vec<error_extraction::ClassImportRequest> = vec![];
+    let mut suffix_requests: Vec<error_extraction::ClassSuffixMatch> = vec![];
+    for path in output_error_paths(&action_failed_error_info).into_iter() {
+        path_to_import_requests(
+            &action_failed_error_info,
+            &path.into(),
+            &mut candidate_import_requests,
+            &mut suffix_requests,
+        )
+        .await
+    }
+
+    if candidate_import_requests.len() == 0 {
+        return 0;
+    }
+    debug!("Candidates: {:#?}", candidate_import_requests);
+
+    for (_, inner_versions) in
+        super::sanitization_tools::expand_candidate_import_requests(candidate_import_requests)
+            .into_iter()
+    {
         'class_entry_loop: for class_name in inner_versions {
             let candidates: Vec<(u16, String)> =
                 get_candidates_for_class_name(action_failed_error_info, &class_name, &index_table);

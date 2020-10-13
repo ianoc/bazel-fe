@@ -42,7 +42,7 @@ fn load_file(path_str: &String) -> Option<ParsedFile> {
         None
     }
 }
-pub fn extract_errors(input: &str) -> Option<Vec<super::ClassImportRequest>> {
+pub fn extract_errors(input: &str) -> Vec<super::ClassImportRequest> {
     let mut file_parse_cache: HashMap<String, ParsedFile> = HashMap::new();
     let combined_vec: Vec<super::ClassImportRequest> = vec![
         error_is_not_a_member_of_package::extract(input),
@@ -96,9 +96,9 @@ pub fn extract_errors(input: &str) -> Option<Vec<super::ClassImportRequest>> {
     })
     .collect();
 
-    if combined_vec.is_empty() {
-        None
-    } else {
-        Some(combined_vec)
-    }
+    combined_vec
+}
+
+pub fn extract_suffix_errors(input: &str) -> Vec<super::ClassSuffixMatch> {
+    Vec::new()
 }

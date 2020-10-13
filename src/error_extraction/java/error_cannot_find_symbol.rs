@@ -39,7 +39,7 @@ fn build_class_import_request_low_priority(
 fn extract_symbol_with_package(
     lines: &Vec<String>,
     src_file_name: &String,
-    result: &mut Option<Vec<JavaClassImportRequest>>,
+    result: &mut Vec<JavaClassImportRequest>,
 ) {
     lazy_static! {
         static ref SYMBOL_RE: Regex = Regex::new(r"^\s*symbol:\s*class\s*(.*)$").unwrap();
@@ -59,12 +59,7 @@ fn extract_symbol_with_package(
             let class_import_request =
                 build_class_import_request(src_file_name.to_string(), class_name);
 
-            match result.as_mut() {
-                None => *result = Some(vec![class_import_request]),
-                Some(inner) => {
-                    inner.push(class_import_request);
-                }
-            };
+            result.push(class_import_request);
         }
         _ => (),
     }
@@ -74,7 +69,7 @@ fn extract_symbol_with_class(
     lines: &Vec<String>,
     src_file_name: &String,
     parsed_file: &ParsedFile,
-    result: &mut Option<Vec<JavaClassImportRequest>>,
+    result: &mut Vec<JavaClassImportRequest>,
 ) {
     lazy_static! {
         static ref SYMBOL_RE: Regex =
@@ -125,12 +120,7 @@ fn extract_symbol_with_class(
             let class_import_request =
                 build_class_import_request_low_priority(src_file_name.to_string(), class_name);
 
-            match result.as_mut() {
-                None => *result = Some(vec![class_import_request]),
-                Some(inner) => {
-                    inner.push(class_import_request);
-                }
-            };
+            result.push(class_import_request);
         }
     }
 }
@@ -144,7 +134,7 @@ pub(in crate::error_extraction) fn extract(
             Regex::new(r"^(.*\.java):(\d+):.*error: cannot find symbol\s*$").unwrap();
     }
 
-    let mut result = None;
+    let mut result = Vec::default();
     let mut process_batch: Option<(Vec<String>, String)> = None;
     for ln in input.lines() {
         let captures = RE.captures(ln);
@@ -176,20 +166,16 @@ pub(in crate::error_extraction) fn extract(
                                 src_file_name.to_string(),
                                 e.prefix_section.to_string(),
                             );
-                            result = match result {
-                                None => Some(vec![class_import_request]),
-                                Some(ref mut inner) => {
-                                    inner.push(class_import_request);
-                                    result
-                                }
-                            };
+                            result.push(class_import_request);
                         }
                     }
                 }
             }
         }
     }
-    result
+    result.sort();
+    result.dedup();
+    Some(result)
 }
 
 #[cfg(test)]

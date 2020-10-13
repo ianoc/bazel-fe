@@ -2,11 +2,12 @@ use std::{collections::HashMap, path::Path};
 
 use crate::source_dependencies::ParsedFile;
 
+mod error_cannot_access;
 mod error_cannot_find_symbol;
 mod error_indirect_dependency;
 mod error_package_does_not_exist;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub struct JavaClassImportRequest {
     pub src_file_name: String,
     pub class_name: String,
@@ -67,7 +68,7 @@ impl FileParseCache {
         self.file_parse_cache.get(file_path)
     }
 }
-pub fn extract_errors(input: &str) -> Option<Vec<super::ClassImportRequest>> {
+pub fn extract_errors(input: &str) -> Vec<super::ClassImportRequest> {
     let mut file_parse_cache: FileParseCache = FileParseCache::new();
     let combined_vec: Vec<super::ClassImportRequest> = vec![
         error_package_does_not_exist::extract(input, &mut file_parse_cache),
@@ -79,9 +80,12 @@ pub fn extract_errors(input: &str) -> Option<Vec<super::ClassImportRequest>> {
     .map(|o| o.to_class_import_request())
     .collect();
 
-    if combined_vec.is_empty() {
-        None
-    } else {
-        Some(combined_vec)
-    }
+    combined_vec
+}
+
+pub fn extract_suffix_errors(input: &str) -> Vec<super::ClassSuffixMatch> {
+    vec![error_cannot_access::extract(input)]
+        .into_iter()
+        .flat_map(|e| e)
+        .collect()
 }
