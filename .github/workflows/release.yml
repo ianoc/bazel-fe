@@ -25,7 +25,8 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --all-features
+          args: --release --all-features\
+      - run: rustup component add rustfmt
       - name: Prepare outputs from platform run
         run: ./.github/ci_scripts/prepare_output.sh ${{ matrix.artifact }} staging-directory
       - uses: actions/upload-artifact@master
