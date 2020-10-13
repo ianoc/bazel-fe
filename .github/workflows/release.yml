@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - master
-env:
-  PROTOBUF_SHA: 655310ca192a6e3a050e0ca0b7084a2968072260
 jobs:
   rust-binaries:
     runs-on: ${{ matrix.os }}
@@ -54,7 +52,7 @@ jobs:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           automatic_release_tag: "v0.1-${{ github.run_number }}"
           prerelease: false
-          title: "Auto generated release for protobuf: ${{ env.PROTOBUF_SHA }}"
+          title: "Auto generated release for bazel-runner"
           files: |
             downloads/bazel-runner-macos
             downloads/bazel-runner-macos.sha256
