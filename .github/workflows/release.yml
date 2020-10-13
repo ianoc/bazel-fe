@@ -22,11 +22,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --all-features\
-      - run: rustup component add rustfmt
+          args: --release --all-features
       - name: Prepare outputs from platform run
         run: ./.github/ci_scripts/prepare_output.sh ${{ matrix.artifact }} staging-directory
       - uses: actions/upload-artifact@master
