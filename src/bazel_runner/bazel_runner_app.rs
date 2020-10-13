@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use tonic::transport::Server;
 
 use bazelfe::protos::*;
+use std::ffi::OsString;
 
 use bazelfe::bazel_runner;
 use bazelfe::build_events::build_event_server::bazel_event;
@@ -88,6 +89,41 @@ where
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = Opt::parse();
+
+    // If someone is using a bes backend we need to nope out so we don't conflict.
+    // This also means our other tools can call in using our same utilities
+    // with this already set to make this app passthrough
+    if opt
+        .passthrough_args
+        .contains(&String::from("--bes_backend"))
+    {
+        let application: OsString = opt
+            .passthrough_args
+            .first()
+            .map(|a| {
+                let a: String = a.clone().into();
+                a
+            })
+            .expect("Should have had at least one arg the bazel process itself.")
+            .into();
+
+        let remaining_args: Vec<OsString> = opt
+            .passthrough_args
+            .iter()
+            .skip(1)
+            .map(|str_ref| {
+                let a: String = str_ref.clone().into();
+                let a: OsString = a.into();
+                a
+            })
+            .collect();
+
+        let resp = ::exec::Command::new(application)
+            .args(&remaining_args)
+            .exec();
+        panic!("Should be unreachable: {:#?}", resp);
+    }
+
     let mut rng = rand::thread_rng();
     let mut builder = pretty_env_logger::formatted_timed_builder();
     builder.format_timestamp_nanos();
