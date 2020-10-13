@@ -171,8 +171,6 @@ pub mod bazel_event {
                         };
 
                         if let Some(e) = target_configured_evt {
-                            println!("e: {:?}", e);
-
                             Evt::TargetConfigured(e)
                         } else if let Some(e) = error_info {
                             e

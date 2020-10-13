@@ -208,10 +208,6 @@ pub async fn process_progress<T: Buildozer + Clone + Send + Sync + 'static>(
     bazel_progress_error_info: &ProgressEvt,
     previous_global_seen: Arc<DashMap<String, DashSet<String>>>,
 ) -> u32 {
-    info!(
-        "To process potential error via progress message: {:?}",
-        bazel_progress_error_info
-    );
     let mut candidate_correction_commands: Vec<BazelCorrectionCommand> = vec![];
 
     extract_added_cycle_in_dependency_graph(
@@ -227,7 +223,6 @@ pub async fn process_build_abort_errors<T: Buildozer + Clone + Send + Sync + 'st
     buildozer: T,
     bazel_abort_error_info: &error_type_extractor::BazelAbortErrorInfo,
 ) -> u32 {
-    info!("To process build abort error: {:?}", bazel_abort_error_info);
     let mut candidate_correction_commands: Vec<BazelCorrectionCommand> = vec![];
 
     extract_target_does_not_exist(&bazel_abort_error_info, &mut candidate_correction_commands);

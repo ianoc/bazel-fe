@@ -88,7 +88,6 @@ where
                         let e = e.clone();
                         let mut tx = tx.clone();
                         let self_d: ActionEventStream<T> = self_d.clone();
-                        println!("Error event: {:#?}", e);
                         tokio::spawn(async move {
                             match e {
                                 error_type_extractor::ErrorInfo::ActionFailed(
