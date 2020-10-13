@@ -1,15 +1,8 @@
 use crate::{build_events::build_event_server::bazel_event::ProgressEvt, protos::*};
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-    path::PathBuf,
-};
 
 use lazy_static::lazy_static;
 
-use crate::{
-    build_events::error_type_extractor, buildozer_driver::Buildozer, error_extraction, index_table,
-};
+use crate::{build_events::error_type_extractor, buildozer_driver::Buildozer};
 use dashmap::{DashMap, DashSet};
 use regex::Regex;
 use std::sync::Arc;

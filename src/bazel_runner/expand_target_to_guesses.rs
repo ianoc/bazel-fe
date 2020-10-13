@@ -14,7 +14,7 @@ pub(crate) fn get_guesses_for_class_name(class_name: &str) -> Vec<(u16, String)>
         idx += 1;
     }
 
-    if (found) {
+    if found {
         sections.truncate(idx);
     }
 

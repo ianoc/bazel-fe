@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 #[derive(Debug, PartialEq)]
 pub struct ClassImportRequest {
     pub class_name: String,

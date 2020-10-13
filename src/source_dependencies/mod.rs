@@ -1,7 +1,6 @@
 extern crate nom;
 
 mod parser_helpers;
-use std::path::PathBuf;
 
 use nom::error::ErrorKind as NomErrorKind;
 #[derive(Debug)]

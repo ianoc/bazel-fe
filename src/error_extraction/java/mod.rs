@@ -59,7 +59,7 @@ impl FileParseCache {
         }
     }
     pub fn load_file(&mut self, file_path: &str) -> Option<&ParsedFile> {
-        if (!self.file_parse_cache.contains_key(file_path)) {
+        if !self.file_parse_cache.contains_key(file_path) {
             if let Some(parsed_file) = do_load_file(file_path) {
                 self.file_parse_cache
                     .insert(file_path.to_string(), parsed_file);

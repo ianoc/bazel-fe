@@ -1,8 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 use crate::build_events::error_type_extractor;
 
@@ -10,7 +6,7 @@ use super::super::index_table;
 use crate::buildozer_driver::Buildozer;
 use dashmap::{DashMap, DashSet};
 use tokio::sync::mpsc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 pub trait ExtractClassData<U> {
     fn paths(&self) -> Vec<PathBuf>;
@@ -39,7 +35,7 @@ where
 
     pub async fn ensure_table_loaded(self) -> () {
         let tbl = Arc::clone(&self.index_table);
-        let mut v = tbl.read().await;
+        let v = tbl.read().await;
         if (*v).is_none() {
             drop(v);
             let mut w = tbl.write().await;
@@ -57,7 +53,6 @@ where
                 Some(_) => (),
             }
             drop(w);
-            v = tbl.read().await;
         }
 
         ()

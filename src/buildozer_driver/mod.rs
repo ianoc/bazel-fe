@@ -1,7 +1,6 @@
 use crate::protos::*;
 use ::prost::Message;
 use async_trait::async_trait;
-use core::future::Future;
 use std::{ffi::OsString, path::PathBuf};
 use tokio::process::Command;
 
@@ -100,7 +99,7 @@ impl BuildozerBinaryImpl {
 #[async_trait]
 impl Buildozer for BuildozerBinaryImpl {
     async fn print_deps(&self, label: &String) -> Result<Vec<String>> {
-        let (raw_args, cmd_result) = self.execute_command(vec!["print deps", &label]).await?;
+        let (_raw_args, cmd_result) = self.execute_command(vec!["print deps", &label]).await?;
 
         Ok(cmd_result
             .records

@@ -98,7 +98,7 @@ pub(in crate::bazel_runner) fn expand_candidate_import_requests(
     candidate_import_requests
         .into_iter()
         .map(|e| {
-            let sub_attempts = if (e.exact_only) {
+            let sub_attempts = if e.exact_only {
                 vec![e.class_name.clone()]
             } else {
                 split_clazz_to_lst(&e.class_name)
