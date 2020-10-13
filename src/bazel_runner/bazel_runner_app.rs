@@ -91,6 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = rand::thread_rng();
     let mut builder = pretty_env_logger::formatted_timed_builder();
     builder.format_timestamp_nanos();
+    builder.target(env_logger::fmt::Target::Stderr);
     if let Ok(s) = ::std::env::var("RUST_LOG") {
         builder.parse_filters(&s);
     }
