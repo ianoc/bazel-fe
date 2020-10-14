@@ -29,17 +29,17 @@ We also include/have a small script to measure how well it can do for you/potent
 
 ## TODO:
 
-[X] Bazel runner that can wrap bazel
-[ ] JVM Indexer to find/index all jvm producing targets
-[ ] Example project
-[ ] All scripts in the right place
-[ ] Integration for auto formatting handling for java/scala
-[ ] Investigate persistant daemon mode:
+- [X] Bazel runner that can wrap bazel
+- [ ] JVM Indexer to find/index all jvm producing targets
+- [ ] Example project
+- [ ] All scripts in the right place
+- [ ] Integration for auto formatting handling for java/scala
+- [ ] Investigate persistant daemon mode:
     - [ ] When file changes rebuild the target that owns it
     - [ ] When the above is successful run tests that directly ddepend on the rebuilt target
     - [ ] Optionally run all tests that transitively depend on the target
-[ ] Build UI experiments using the TUI library to show better histograms/data while building.
-[ ] Web interface?
+- [ ] Build UI experiments using the TUI library to show better histograms/data while building.
+- [ ] Web interface?
 
 
 ## Bazel runner
