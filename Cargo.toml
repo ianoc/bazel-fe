@@ -81,3 +81,7 @@ path = "src/bazel_runner/bazel_runner_app.rs"
 name = "buildozer-driver"
 path = "src/buildozer_driver/buildozer_driver_app.rs"
 
+[[bin]]
+name = "jvm-indexer"
+path = "src/jvm_indexer/jvm_indexer_app.rs"
+

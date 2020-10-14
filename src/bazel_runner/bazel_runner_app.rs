@@ -183,6 +183,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         attempts += 1;
     }
 
-    println!("Attempts/build cycles: {:?}", attempts);
+    info!("Attempts/build cycles: {:?}", attempts);
     std::process::exit(final_exit_code);
 }

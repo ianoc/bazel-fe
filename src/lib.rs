@@ -10,6 +10,7 @@ pub mod buildozer_driver;
 pub mod error_extraction;
 pub mod event;
 pub mod index_table;
+pub mod jvm_indexer;
 pub mod protos;
 pub mod source_dependencies;
 pub mod tokioext;
