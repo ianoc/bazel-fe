@@ -16,10 +16,11 @@ Be a suite of tools to provide ultimately a different frontend around bazel. Ini
 ## Using it
 1) Configure a CI job to run the indexer, it should produce a binary output
 2) Store the output in a location which is fetchable by your developers/users
-3) From the examples you need to install:
+4) Expose buildozer at a path(scripts can fetch, could we embed in release?)
+5) From the examples you need to install:
    -> Some code/bash script (could be built into the launcher in future?) to fetch the index to provide
    -> Bash script for tools/bazel to alloow hooking into the bazel commands and delegating to the `bazel-runner` application
-4) Run it
+6) Run it
 
 Other things:
 We also include/have a small script to measure how well it can do for you/potentially handle targets with unused dependencies. the `slow_unused_deps.sh` script will remove all dependencies from a target then try build it again. If the above is all working right, hopefully like magic it should just recover + build ok.
@@ -39,3 +40,31 @@ We also include/have a small script to measure how well it can do for you/potent
     - [ ] Optionally run all tests that transitively depend on the target
 [ ] Build UI experiments using the TUI library to show better histograms/data while building.
 [ ] Web interface?
+
+
+## Bazel runner
+
+```
+basic
+
+USAGE:
+    bazel-runner [OPTIONS] <passthrough-args>... --buildozer-path <buildozer-path>
+
+ARGS:
+    <passthrough-args>...
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --bind-address <bind-address>                    [env: BIND_ADDRESS=]
+        --buildozer-path <buildozer-path>                [env: BUILDOZER_PATH=]
+        --index-input-location <index-input-location>    [env: INDEX_INPUT_LOCATION=]
+```
+
+Options:
+- Bind adddress, optional, change the ip/port we bind our GRPC server to that we tell bazel to use for BEP
+- buildozer path required for buildozer operations to allow making changes/sniffing dependencies in build files
+- passthrough args, what the user called bazel with, e.g.:
+  `/path/to/bazel-real build --flag --flag src/main/blah:wer`
