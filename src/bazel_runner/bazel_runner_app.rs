@@ -14,7 +14,7 @@ use std::ffi::OsString;
 use bazelfe::bazel_runner;
 use bazelfe::build_events::build_event_server::bazel_event;
 use bazelfe::build_events::build_event_server::BuildEventAction;
-use bazelfe::build_events::error_type_extractor::ErrorInfo;
+use bazelfe::build_events::hydrated_stream::HydratedInfo;
 use bazelfe::buildozer_driver;
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
 use rand::Rng;
@@ -56,7 +56,7 @@ where
         let mut locked = sender_arc.lock().await;
         *locked = Some(tx);
     };
-    let error_stream = ErrorInfo::build_transformer(rx);
+    let error_stream = HydratedInfo::build_transformer(rx);
 
     let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
 

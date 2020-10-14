@@ -2,7 +2,7 @@ use crate::{build_events::build_event_server::bazel_event::ProgressEvt, protos::
 
 use lazy_static::lazy_static;
 
-use crate::{build_events::error_type_extractor, buildozer_driver::Buildozer};
+use crate::{build_events::hydrated_stream, buildozer_driver::Buildozer};
 use dashmap::{DashMap, DashSet};
 use regex::Regex;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ struct BuildozerRemoveDepCmd {
 }
 
 fn extract_target_does_not_exist(
-    bazel_abort_error_info: &error_type_extractor::BazelAbortErrorInfo,
+    bazel_abort_error_info: &hydrated_stream::BazelAbortErrorInfo,
     command_stream: &mut Vec<BazelCorrectionCommand>,
 ) {
     lazy_static! {
@@ -53,7 +53,7 @@ fn extract_target_does_not_exist(
 }
 
 fn extract_target_not_visible(
-    bazel_abort_error_info: &error_type_extractor::BazelAbortErrorInfo,
+    bazel_abort_error_info: &hydrated_stream::BazelAbortErrorInfo,
     command_stream: &mut Vec<BazelCorrectionCommand>,
 ) {
     lazy_static! {
@@ -214,7 +214,7 @@ pub async fn process_progress<T: Buildozer + Clone + Send + Sync + 'static>(
 
 pub async fn process_build_abort_errors<T: Buildozer + Clone + Send + Sync + 'static>(
     buildozer: T,
-    bazel_abort_error_info: &error_type_extractor::BazelAbortErrorInfo,
+    bazel_abort_error_info: &hydrated_stream::BazelAbortErrorInfo,
 ) -> u32 {
     let mut candidate_correction_commands: Vec<BazelCorrectionCommand> = vec![];
 
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn test_extract_target_does_not_exist() {
         // This was referring to a random string put into the dependencies list of the target
-        let sample_output = error_type_extractor::BazelAbortErrorInfo {
+        let sample_output = hydrated_stream::BazelAbortErrorInfo {
             description: String::from("in deps attribute of java_library rule //src/main/java/com/example:Example: target '//src/main/java/com/example:asdfasdf' does not exist"),
             reason: Some(build_event_stream::aborted::AbortReason::AnalysisFailure),
             label: None
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn test_extract_target_not_visible() {
         // This was referring to a random string put into the dependencies list of the target
-        let sample_output = error_type_extractor::BazelAbortErrorInfo {
+        let sample_output = hydrated_stream::BazelAbortErrorInfo {
             description: String::from("in java_library rule //src/main/java/com/com/example:Example: target '@third_party_jvm//3rdparty/jvm/com/google/api/grpc:proto_google_common_protos' is not visible from target '//src/main/java/com/com/example:Example'. Check the visibility declaration of the former target if you think the dependency is legitimate"),
             reason: Some(build_event_stream::aborted::AbortReason::AnalysisFailure),
             label: None

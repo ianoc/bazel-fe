@@ -15,6 +15,9 @@ use crate::protos::*;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
+// This is keeping some state as we go through a stream to hydrate values with things like rule kinds
+// not on the indvidual events.
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct ActionFailedErrorInfo {
     pub label: String,
@@ -29,21 +32,28 @@ pub struct BazelAbortErrorInfo {
     pub description: String,
 }
 
-//May or may not contain error info not reflected elsewhere?
+#[derive(Clone, PartialEq, Debug)]
+pub struct ActionSuccessInfo {
+    pub label: String,
+    pub stdout: Option<build_event_stream::file::File>,
+    pub stderr: Option<build_event_stream::file::File>,
+    pub target_kind: Option<String>,
+}
 
 // Broad strokes of the failure occured inside an action (most common)
 // or at a bazel abort, things like mis-configured build files
 #[derive(Clone, PartialEq, Debug)]
-pub enum ErrorInfo {
+pub enum HydratedInfo {
     BazelAbort(BazelAbortErrorInfo),
     ActionFailed(ActionFailedErrorInfo),
     Progress(bazel_event::ProgressEvt),
+    ActionSuccess(ActionSuccessInfo),
 }
 
-impl ErrorInfo {
+impl HydratedInfo {
     pub fn build_transformer(
         mut rx: broadcast::Receiver<BuildEventAction<bazel_event::BazelBuildEvent>>,
-    ) -> mpsc::Receiver<Option<ErrorInfo>> {
+    ) -> mpsc::Receiver<Option<HydratedInfo>> {
         let (mut tx, next_rx) = mpsc::channel(256);
 
         tokio::spawn(async move {
@@ -73,7 +83,21 @@ impl ErrorInfo {
                                         .map(|e| e.clone()),
                                     label: ace.label,
                                 };
-                                tx.send(Some(ErrorInfo::ActionFailed(err_info)))
+                                tx.send(Some(HydratedInfo::ActionFailed(err_info)))
+                                    .await
+                                    .unwrap();
+                            } else {
+                                println!("{:#?}", ace);
+                                let act_info = ActionSuccessInfo {
+                                    stdout: ace.stdout,
+                                    stderr: ace.stderr,
+
+                                    target_kind: rule_kind_lookup
+                                        .get(&ace.label)
+                                        .map(|e| e.clone()),
+                                    label: ace.label,
+                                };
+                                tx.send(Some(HydratedInfo::ActionSuccess(act_info)))
                                     .await
                                     .unwrap();
                             }
@@ -85,12 +109,14 @@ impl ErrorInfo {
                                 target_kind: rule_kind_lookup.get(&tfe.label).map(|e| e.clone()),
                                 label: tfe.label,
                             };
-                            tx.send(Some(ErrorInfo::ActionFailed(err_info)))
+                            tx.send(Some(HydratedInfo::ActionFailed(err_info)))
                                 .await
                                 .unwrap();
                         }
                         bazel_event::Evt::Progress(progress) => {
-                            tx.send(Some(ErrorInfo::Progress(progress))).await.unwrap();
+                            tx.send(Some(HydratedInfo::Progress(progress)))
+                                .await
+                                .unwrap();
                         }
                         bazel_event::Evt::Aborted(tfe) => {
                             let err_info = BazelAbortErrorInfo {
@@ -98,7 +124,7 @@ impl ErrorInfo {
                                 description: tfe.description,
                                 label: tfe.label,
                             };
-                            tx.send(Some(ErrorInfo::BazelAbort(err_info)))
+                            tx.send(Some(HydratedInfo::BazelAbort(err_info)))
                                 .await
                                 .unwrap();
                         }
@@ -119,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn test_no_history() {
         let (tx, rx) = broadcast::channel(128);
-        let mut child_rx = ErrorInfo::build_transformer(rx);
+        let mut child_rx = HydratedInfo::build_transformer(rx);
 
         tx.send(BuildEventAction::BuildEvent(bazel_event::BazelBuildEvent {
             event: bazel_event::Evt::ActionCompleted(bazel_event::ActionCompletedEvt {
@@ -135,7 +161,7 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
+            Some(HydratedInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: None,
                 label: String::from("foo_bar_baz"),
                 output_files: vec![]
@@ -146,7 +172,7 @@ mod tests {
     #[tokio::test]
     async fn test_with_files() {
         let (tx, rx) = broadcast::channel(128);
-        let mut child_rx = ErrorInfo::build_transformer(rx);
+        let mut child_rx = HydratedInfo::build_transformer(rx);
 
         tx.send(BuildEventAction::BuildEvent(bazel_event::BazelBuildEvent {
             event: bazel_event::Evt::ActionCompleted(bazel_event::ActionCompletedEvt {
@@ -166,7 +192,7 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
+            Some(HydratedInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: None,
                 label: String::from("foo_bar_baz"),
                 output_files: vec![
@@ -180,7 +206,7 @@ mod tests {
     #[tokio::test]
     async fn test_with_history() {
         let (tx, rx) = broadcast::channel(128);
-        let mut child_rx = ErrorInfo::build_transformer(rx);
+        let mut child_rx = HydratedInfo::build_transformer(rx);
 
         tx.send(BuildEventAction::BuildEvent(bazel_event::BazelBuildEvent {
             event: bazel_event::Evt::TargetConfigured(bazel_event::TargetConfiguredEvt {
@@ -208,7 +234,7 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
+            Some(HydratedInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: Some(String::from("my_madeup_rule")),
                 label: String::from("foo_bar_baz"),
                 output_files: vec![
@@ -222,7 +248,7 @@ mod tests {
     #[tokio::test]
     async fn state_resets_on_new_build() {
         let (tx, rx) = broadcast::channel(128);
-        let mut child_rx = ErrorInfo::build_transformer(rx);
+        let mut child_rx = HydratedInfo::build_transformer(rx);
 
         tx.send(BuildEventAction::BuildEvent(bazel_event::BazelBuildEvent {
             event: bazel_event::Evt::TargetConfigured(bazel_event::TargetConfiguredEvt {
@@ -257,7 +283,7 @@ mod tests {
 
         assert_eq!(
             received_res,
-            Some(ErrorInfo::ActionFailed(ActionFailedErrorInfo {
+            Some(HydratedInfo::ActionFailed(ActionFailedErrorInfo {
                 target_kind: None,
                 label: String::from("foo_bar_baz"),
                 output_files: vec![

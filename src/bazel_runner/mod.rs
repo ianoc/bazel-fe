@@ -85,6 +85,14 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
     command: Vec<S>,
     bes_port: u16,
 ) -> ExecuteResult {
+    execute_bazel_output_control(command, bes_port, true).await
+}
+
+pub async fn execute_bazel_output_control<S: Into<String> + Clone>(
+    command: Vec<S>,
+    bes_port: u16,
+    show_output: bool,
+) -> ExecuteResult {
     let application: OsString = command
         .first()
         .map(|a| {
@@ -126,7 +134,9 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
 
         while bytes_read > 0 {
             bytes_read = child_stdout.read(&mut buffer[..]).await.unwrap();
-            stdout.write_all(&buffer[0..bytes_read]).await.unwrap();
+            if show_output {
+                stdout.write_all(&buffer[0..bytes_read]).await.unwrap();
+            }
         }
     });
 
@@ -138,7 +148,9 @@ pub async fn execute_bazel<S: Into<String> + Clone>(
         let mut stderr = tokio::io::stderr();
         while bytes_read > 0 {
             bytes_read = child_stderr.read(&mut buffer[..]).await.unwrap();
-            stderr.write_all(&buffer[0..bytes_read]).await.unwrap();
+            if show_output {
+                stderr.write_all(&buffer[0..bytes_read]).await.unwrap();
+            }
         }
     });
     let result = child.await.expect("The command wasn't running");

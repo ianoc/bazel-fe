@@ -1,7 +1,5 @@
-use crate::protos::*;
-use ::prost::Message;
 use async_trait::async_trait;
-use std::{ffi::OsString, path::PathBuf};
+use std::path::PathBuf;
 use tokio::process::Command;
 
 #[derive(Clone, PartialEq, Debug)]

@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use crate::build_events::error_type_extractor;
+use crate::build_events::hydrated_stream;
 
 use super::super::index_table;
 use crate::buildozer_driver::Buildozer;
@@ -60,7 +60,7 @@ where
 
     pub fn build_action_pipeline(
         &self,
-        mut rx: mpsc::Receiver<Option<error_type_extractor::ErrorInfo>>,
+        mut rx: mpsc::Receiver<Option<hydrated_stream::HydratedInfo>>,
     ) -> mpsc::Receiver<Option<u32>> {
         let (mut tx, next_rx) = mpsc::channel(4096);
 
@@ -85,7 +85,7 @@ where
                         let self_d: ActionEventStream<T> = self_d.clone();
                         tokio::spawn(async move {
                             match e {
-                                error_type_extractor::ErrorInfo::ActionFailed(
+                                hydrated_stream::HydratedInfo::ActionFailed(
                                     action_failed_error_info,
                                 ) => {
                                     let tbl = Arc::clone(&self_d.index_table);
@@ -109,7 +109,7 @@ where
                                     }
                                 }
 
-                                error_type_extractor::ErrorInfo::BazelAbort(
+                                hydrated_stream::HydratedInfo::BazelAbort(
                                     bazel_abort_error_info,
                                 ) => {
                                     let actions_completed = super::process_build_abort_errors::process_build_abort_errors(
@@ -121,7 +121,8 @@ where
                                         tx.send(Some(actions_completed)).await.unwrap();
                                     }
                                 }
-                                error_type_extractor::ErrorInfo::Progress(progress_info) => {
+                                hydrated_stream::HydratedInfo::ActionSuccess(_) => (),
+                                hydrated_stream::HydratedInfo::Progress(progress_info) => {
                                     let tbl = Arc::clone(&self_d.previous_global_seen);
 
                                     let actions_completed =

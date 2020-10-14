@@ -8,7 +8,7 @@ use std::{
 use lazy_static::lazy_static;
 
 use crate::{
-    build_events::error_type_extractor::ActionFailedErrorInfo, buildozer_driver::Buildozer,
+    build_events::hydrated_stream::ActionFailedErrorInfo, buildozer_driver::Buildozer,
     error_extraction, index_table,
 };
 

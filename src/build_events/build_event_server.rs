@@ -105,15 +105,7 @@ pub mod bazel_event {
                             _ => None,
                         });
 
-                        let error_info: Option<Evt> = {
-                            let label_name_opt = v.payload.as_ref().and_then(|e| match e {
-                                build_event_stream::build_event::Payload::Action(cfg) => {
-                                    let stdout_f = cfg.stdout.as_ref().and_then(|e| e.file.clone());
-                                    let stderr_f = cfg.stderr.as_ref().and_then(|e| e.file.clone());
-                                    Some((cfg.success, stdout_f, stderr_f))
-                                }
-                                _ => None,
-                            });
+                        let action_info: Option<Evt> = {
                             let target_label_opt =
                                 v.id.as_ref()
                                     .and_then(|e| e.id.as_ref())
@@ -124,14 +116,28 @@ pub mod bazel_event {
                                         _ => None,
                                     });
 
-                            label_name_opt.and_then(|(success, stdout, stderr)| {
-                                target_label_opt.map(|u| {
-                                    Evt::ActionCompleted(ActionCompletedEvt {
-                                        success: success,
-                                        label: u,
-                                        stdout: stdout,
-                                        stderr: stderr,
-                                    })
+                            target_label_opt.and_then(|label| {
+                                v.payload.as_ref().and_then(|e| match e {
+                                    build_event_stream::build_event::Payload::Action(
+                                        action_executed,
+                                    ) => {
+                                        let stdout = action_executed
+                                            .stdout
+                                            .as_ref()
+                                            .and_then(|e| e.file.clone());
+                                        let stderr = action_executed
+                                            .stderr
+                                            .as_ref()
+                                            .and_then(|e| e.file.clone());
+
+                                        Some(Evt::ActionCompleted(ActionCompletedEvt {
+                                            success: action_executed.success,
+                                            label: label,
+                                            stdout: stdout,
+                                            stderr: stderr,
+                                        }))
+                                    }
+                                    _ => None,
                                 })
                             })
                         };
@@ -172,7 +178,7 @@ pub mod bazel_event {
 
                         if let Some(e) = target_configured_evt {
                             Evt::TargetConfigured(e)
-                        } else if let Some(e) = error_info {
+                        } else if let Some(e) = action_info {
                             e
                         } else if let Some(e) = test_outputs {
                             e

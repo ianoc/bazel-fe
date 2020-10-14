@@ -10,6 +10,13 @@ use std::{collections::HashMap, collections::HashSet, error::Error};
 pub struct IndexTable {
     tbl_map: HashMap<String, Vec<(u16, String)>>,
 }
+impl Default for IndexTable {
+    fn default() -> Self {
+        Self {
+            tbl_map: HashMap::default(),
+        }
+    }
+}
 impl IndexTable {
     pub fn new() -> Self {
         Self {
