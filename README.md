@@ -16,7 +16,7 @@ Be a suite of tools to provide ultimately a different frontend around bazel. Ini
 ## Using it
 1) Configure a CI job to run the indexer, it should produce a binary output
 2) Store the output in a location which is fetchable by your developers/users
-4) Expose buildozer at a path(scripts can fetch, could we embed in release?)
+4) Expose buildozer at a path(fetch or via https://doc.rust-lang.org/std/macro.include_bytes.html or https://github.com/pyros2097/rust-embed we could probably embed in the release to ease distribution.)
 5) From the examples you need to install:
    -> Some code/bash script (could be built into the launcher in future?) to fetch the index to provide
    -> Bash script for tools/bazel to alloow hooking into the bazel commands and delegating to the `bazel-runner` application
