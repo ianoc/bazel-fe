@@ -13,8 +13,6 @@ use std::sync::atomic::Ordering;
 use tonic::transport::Server;
 
 use bazelfe::protos::*;
-use std::fs::File;
-use std::io::prelude::*;
 
 use bazelfe::bazel_runner;
 use bazelfe::build_events::build_event_server::bazel_event;
@@ -142,6 +140,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let allowed_rule_kinds: Vec<String> = vec![
         "java_library",
+        "java_import",
+        "scala_import",
         "scala_library",
         "scala_proto_library",
         "scala_macro_library",
