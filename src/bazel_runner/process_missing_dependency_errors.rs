@@ -213,7 +213,6 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
                 if !ignore_dep_references.contains(&target_name)
                     && is_potentially_valid_target(&target_name)
                 {
-                    warn!("Potentially valid target: {:?}", target_name);
                     // If our top candidate hits to be a local previous seen stop
                     // processing this class
                     if local_previous_seen.contains(&target_name) {

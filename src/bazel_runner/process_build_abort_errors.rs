@@ -52,6 +52,37 @@ fn extract_target_does_not_exist(
     }
 }
 
+fn extract_target_not_declared_in_package(
+    bazel_progress_error_info: &ProgressEvt,
+    command_stream: &mut Vec<BazelCorrectionCommand>,
+) {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(
+            r".*no such target '([^']*)': target '.*' not declared in package '.*' defined by .* and referenced by '([^']*)'"
+        )
+        .unwrap();
+    }
+
+    for ln in bazel_progress_error_info.stderr.lines() {
+        let captures = RE.captures(ln);
+
+        match captures {
+            None => (),
+            Some(captures) => {
+                let src_target = captures.get(2).unwrap().as_str();
+                let offending_dependency = captures.get(1).unwrap().as_str();
+
+                let correction =
+                    BazelCorrectionCommand::BuildozerRemoveDep(BuildozerRemoveDepCmd {
+                        target_to_operate_on: src_target.to_string(),
+                        dependency_to_remove: offending_dependency.to_string(),
+                    });
+                command_stream.push(correction);
+            }
+        }
+    }
+}
+
 fn extract_target_not_visible(
     bazel_abort_error_info: &hydrated_stream::BazelAbortErrorInfo,
     command_stream: &mut Vec<BazelCorrectionCommand>,
@@ -209,6 +240,11 @@ pub async fn process_progress<T: Buildozer + Clone + Send + Sync + 'static>(
         &previous_global_seen,
     );
 
+    extract_target_not_declared_in_package(
+        &bazel_progress_error_info,
+        &mut candidate_correction_commands,
+    );
+
     apply_candidates(candidate_correction_commands, buildozer).await
 }
 
@@ -244,6 +280,27 @@ mod tests {
                 BuildozerRemoveDepCmd {
                     target_to_operate_on: String::from("//src/main/java/com/example:Example"),
                     dependency_to_remove: String::from("//src/main/java/com/example:asdfasdf"),
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn test_extract_target_not_declared_in_package() {
+        // This was referring to a random string put into the dependencies list of the target
+        let sample_output = ProgressEvt {
+            stderr: String::from("no such target '//src/main/java/com/example/foo:foo': target 'foo' not declared in package 'src/main/java/com/example/foo' defined by /User/jim/github/example_bazel_project/src/main/java/com/example/foo/BUILD and referenced by '//src/main/java/com/example/c:c'"),
+            stdout: String::from("")
+        };
+
+        let mut results = vec![];
+        extract_target_not_declared_in_package(&sample_output, &mut results);
+        assert_eq!(
+            results,
+            vec![BazelCorrectionCommand::BuildozerRemoveDep(
+                BuildozerRemoveDepCmd {
+                    target_to_operate_on: String::from("//src/main/java/com/example/c:c"),
+                    dependency_to_remove: String::from("//src/main/java/com/example/foo:foo"),
                 }
             )]
         );

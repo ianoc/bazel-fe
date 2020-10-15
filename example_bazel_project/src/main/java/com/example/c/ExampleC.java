@@ -1,5 +1,8 @@
 package com.example.c;
 
-class ExampleC {
+import com.example.foo.BarExample;
+public class ExampleC {
+  public ExampleC(BarExample barExample) {
 
+  }
 }
