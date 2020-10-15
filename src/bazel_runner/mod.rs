@@ -115,7 +115,7 @@ pub async fn execute_bazel_output_control<S: Into<String> + Clone>(
             .collect(),
     };
 
-    log::info!("{:?} {:?}", application, updated_command);
+    debug!("{:?} {:?}", application, updated_command);
     let mut cmd = Command::new(application);
 
     cmd.args(&updated_command)
