@@ -5,8 +5,8 @@ use regex::Regex;
 
 use lazy_static::lazy_static;
 
+use std::path::PathBuf;
 use std::time::Instant;
-use std::{collections::HashMap, path::PathBuf};
 
 use std::env;
 use std::sync::atomic::Ordering;
@@ -18,17 +18,17 @@ use bazelfe::bazel_runner;
 use bazelfe::build_events::build_event_server::bazel_event;
 use bazelfe::build_events::build_event_server::BuildEventAction;
 use bazelfe::build_events::hydrated_stream::HydratedInfo;
-use bazelfe::buildozer_driver;
 use bazelfe::jvm_indexer::bazel_query::BazelQuery;
 use dashmap::{DashMap, DashSet};
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
 use rand::Rng;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 
 #[derive(Clap, Debug)]
-#[clap(name = "basic", setting = AppSettings::TrailingVarArg)]
+#[clap(name = "basic")]
 struct Opt {
     #[clap(long, env = "BIND_ADDRESS")]
     bind_address: Option<String>,
@@ -44,6 +44,9 @@ struct Opt {
 
     #[clap(long)]
     extra_allowed_rule_kinds: Option<Vec<String>>,
+
+    #[clap(long)]
+    bazel_deps_root: Option<String>,
 }
 
 fn build_rule_queries(allowed_rule_kinds: &Vec<String>, target_roots: &Vec<String>) -> Vec<String> {
@@ -153,15 +156,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .chain(opt.extra_allowed_rule_kinds.unwrap_or_default().into_iter())
     .collect();
 
-    info!("Executing initial query to find all external repos in this bazel repository");
     let bazel_query = bazelfe::jvm_indexer::bazel_query::from_binary_path(opt.bazel_binary_path);
 
+    let bazel_deps_replacement_map: HashMap<String, String> = match &opt.bazel_deps_root {
+        None => HashMap::default(),
+        Some(bazel_deps_root) => {
+            let targets_in_bazel_deps_root = bazel_query
+                .execute(&vec![
+                    String::from("query"),
+                    format!("{}//3rdparty/jvm/...", bazel_deps_root),
+                    String::from("--keep_going"),
+                ])
+                .await;
+
+            let bazel_deps_deps = bazel_query
+                .execute(&vec![
+                    String::from("query"),
+                    format!("deps({}//3rdparty/jvm/...)", bazel_deps_root),
+                    String::from("--output"),
+                    String::from("graph"),
+                    String::from("--keep_going"),
+                ])
+                .await;
+
+            let bazel_deps = {
+                let mut bazel_deps = HashSet::new();
+                for ln in targets_in_bazel_deps_root.stdout.lines().into_iter() {
+                    bazel_deps.insert(ln);
+                }
+                bazel_deps
+            };
+            let mut mapping = HashMap::new();
+            for ln in bazel_deps_deps.stdout.lines().into_iter() {
+                if ln.contains(" -> ") {
+                    let elements: Vec<&str> = ln.split(" -> ").collect();
+                    if elements.len() > 1 {
+                        let src = elements[0].trim();
+                        let dest = elements[1].trim();
+
+                        let mut e = mapping
+                            .entry(src.replace("\"", "").to_string())
+                            .or_insert(Vec::default());
+                        e.push(dest.replace("\"", ""));
+                    }
+                }
+            }
+
+            let mut results_mapping = HashMap::new();
+            for bazel_dep in bazel_deps {
+                if let Some(values) = mapping.get(&bazel_dep.to_string()) {
+                    let mut values = values.clone();
+                    while !values.is_empty() {
+                        let e = values.pop().unwrap();
+                        if e.starts_with("@") {
+                            results_mapping.insert(e, bazel_dep.to_string());
+                        } else if e.starts_with("//external") {
+                            if let Some(r) = mapping.get(&e) {
+                                values.extend(r.clone().into_iter());
+                            }
+                        }
+                    }
+                }
+            }
+            results_mapping
+        }
+    };
+
+    info!("Executing initial query to find all external repos in this bazel repository");
+
     let res = bazel_query
-        .execute(&vec![
-            String::from("query"),
-            String::from("--keep_going"),
-            String::from("//external:*"),
-        ])
+        .execute(&vec![String::from("query"), String::from("//external:*")])
         .await;
 
     let mut target_roots = vec![String::from("//...")];
@@ -363,10 +427,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for kv in results_map.iter() {
         let key = kv.key();
         let value = kv.value();
-        let freq: usize = ret.get(key).unwrap_or(&0).clone();
+        let re = bazel_deps_replacement_map.get(key).unwrap_or(key).clone();
+        let freq: usize = ret.get(&re).unwrap_or(&0).clone();
         for inner_v in value {
             let v = reverse_hashmap.entry(inner_v.clone()).or_insert(vec![]);
-            v.push((freq, key.clone()))
+            v.push((freq, re.clone()))
         }
     }
 
