@@ -10,7 +10,7 @@ BINARY=$3
 
 GENERATED_SHA_256=$(shasum -a 256 $BINARY | awk '{print $1}')
 
-if [ !-d $OUTPUT_PATH ]; then 
+if [ ! -d $OUTPUT_PATH ]; then 
     mkdir $OUTPUT_PATH
 fi
 
