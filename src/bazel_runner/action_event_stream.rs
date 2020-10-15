@@ -43,8 +43,12 @@ where
                 None => {
                     let index_tbl = match &self.index_input_location {
                         Some(p) => {
-                            let content = std::fs::read_to_string(p).unwrap();
-                            index_table::parse_file(&content).unwrap()
+                            if p.exists() {
+                                let content = std::fs::read_to_string(p).unwrap();
+                                index_table::parse_file(&content).unwrap()
+                            } else {
+                                index_table::IndexTable::new()
+                            }
                         }
                         None => index_table::IndexTable::new(),
                     };
