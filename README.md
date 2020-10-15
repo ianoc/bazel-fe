@@ -25,11 +25,11 @@ We also include/have a small script to measure how well it can do for you/potent
 ## TODO:
 
 - [x] Bazel runner that can wrap bazel
-- [ ] JVM Indexer to find/index all jvm producing targets
+- x ] JVM Indexer to find/index all jvm producing targets
   - [ ] Investigate TUI/tabbed interface when running tooling so that the bazel stdout/stderr can be preserved/viewed but not swamp things like indexing
   - [ ] Investigate using an aspect to gather the index information
-- [ ] Example project
-- [ ] All scripts in the right place
+- [x] Example project
+- [x] All scripts in the right place
 - [ ] Integration for auto formatting handling for java/scala
 - [ ] Investigate persistant daemon mode:
   - [ ] When file changes rebuild the target that owns it
