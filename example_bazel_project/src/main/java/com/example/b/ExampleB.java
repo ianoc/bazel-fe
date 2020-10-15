@@ -1,5 +1,5 @@
 package com.example.b;
 
-class ExampleB {
+public class ExampleB {
 
 }

@@ -18,11 +18,11 @@ pub(crate) fn get_guesses_for_class_name(class_name: &str) -> Vec<(u16, String)>
         sections.truncate(idx);
     }
 
-    if sections.len() <= 3 {
+    if sections.len() < 3 {
         return vec![];
     }
 
-    let suffix = sections.join("/");
+    let suffix = format!("{}:{}", sections.join("/"), sections.last().unwrap());
 
     vec![
         (0, format!("//src/main/scala/{}", suffix).to_string()),
@@ -39,8 +39,14 @@ mod tests {
         assert_eq!(
             get_guesses_for_class_name("com.example.foo.bar.baz"),
             vec![
-                (0, String::from("//src/main/scala/com/example/foo/bar/baz")),
-                (0, String::from("//src/main/java/com/example/foo/bar/baz"))
+                (
+                    0,
+                    String::from("//src/main/scala/com/example/foo/bar/baz:baz")
+                ),
+                (
+                    0,
+                    String::from("//src/main/java/com/example/foo/bar/baz:baz")
+                )
             ]
         );
     }
@@ -48,7 +54,7 @@ mod tests {
     #[test]
     fn test_guess_for_class_name_too_short() {
         assert_eq!(
-            get_guesses_for_class_name("com.example.foo"),
+            get_guesses_for_class_name("com.example"),
             Vec::<(u16, String)>::new()
         );
     }
@@ -58,8 +64,14 @@ mod tests {
         assert_eq!(
             get_guesses_for_class_name("com.example.foo.bar.baz.MyObject.InnerObject"),
             vec![
-                (0, String::from("//src/main/scala/com/example/foo/bar/baz")),
-                (0, String::from("//src/main/java/com/example/foo/bar/baz"))
+                (
+                    0,
+                    String::from("//src/main/scala/com/example/foo/bar/baz:baz")
+                ),
+                (
+                    0,
+                    String::from("//src/main/java/com/example/foo/bar/baz:baz")
+                )
             ]
         );
     }

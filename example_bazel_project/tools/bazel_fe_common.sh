@@ -33,7 +33,7 @@ JVM_INDEXER_URL=https://github.com/ianoc/bazel-fe/releases/download/${BAZEL_FE_V
 JVM_INDEXER_SHA_URL=https://github.com/ianoc/bazel-fe/releases/download/${BAZEL_FE_VERSION}/jvm-indexer-${BAZEL_FE_PLATFORM_NAME}.sha256
 JVM_INDEXER_LOCAL_PATH="${BAZEL_FE_TOOLS}/jvm-indexer-${BAZEL_FE_VERSION}"
 
-BUILDOZER_URL=https://github.com/bazelbuild/buildtools/releases/download/${BUILDOZER_VERSION}/buildifier${BUILDIFIER_PLATFORM_SUFFIX}
+BUILDOZER_URL=https://github.com/bazelbuild/buildtools/releases/download/${BUILDOZER_VERSION}/buildozer${BUILDIFIER_PLATFORM_SUFFIX}
 BUILDOZER_SHA_URL=""
 BUILDOZER_LOCAL_PATH="${BAZEL_FE_TOOLS}/buildozer-${BUILDOZER_VERSION}"
 

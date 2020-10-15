@@ -19,7 +19,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     for f in opt.files.iter() {
         let content = fs::read_to_string(f)?;
 
-        println!("Here");
         let _parsed_file = parse_file(&content).unwrap();
     }
     Ok(())

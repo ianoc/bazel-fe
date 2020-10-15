@@ -63,7 +63,7 @@ fn recursive_lookup(
     lut: &HashMap<String, build_event_stream::NamedSetOfFiles>,
     results: &mut Vec<build_event_stream::file::File>,
     mut ids: Vec<String>,
-) {
+) -> bool {
     while !ids.is_empty() {
         if let Some(head) = ids.pop() {
             if let Some(r) = lut.get(&head) {
@@ -73,8 +73,51 @@ fn recursive_lookup(
                         .flat_map(|e| e.file.as_ref().map(|e| e.clone())),
                 );
                 ids.extend(r.file_sets.iter().map(|e| e.id.clone()));
+            } else {
+                return false;
             }
         }
+    }
+    true
+}
+
+fn tce_event(
+    tce: bazel_event::TargetCompletedEvt,
+    rule_kind_lookup: &HashMap<String, String>,
+    named_set_of_files_lookup: &HashMap<String, build_event_stream::NamedSetOfFiles>,
+    to_revisit: &mut Vec<bazel_event::TargetCompletedEvt>,
+) -> Option<TargetCompleteInfo> {
+    let mut output_files = Vec::default();
+    let found_everything = if let Some(output_grp) = &tce
+        .output_groups
+        .iter()
+        .filter(|grp| grp.name == "default")
+        .next()
+    {
+        recursive_lookup(
+            &named_set_of_files_lookup,
+            &mut output_files,
+            output_grp
+                .file_sets
+                .iter()
+                .map(|fs| fs.id.clone())
+                .collect(),
+        )
+    } else {
+        true
+    };
+
+    if found_everything {
+        let target_complete_info = TargetCompleteInfo {
+            output_files: output_files,
+            target_kind: rule_kind_lookup.get(&tce.label).map(|e| e.clone()),
+            label: tce.label,
+            success: tce.success,
+        };
+        Some(target_complete_info)
+    } else {
+        to_revisit.push(tce);
+        None
     }
 }
 
@@ -87,6 +130,8 @@ impl HydratedInfo {
         tokio::spawn(async move {
             let mut rule_kind_lookup = HashMap::new();
             let mut named_set_of_files_lookup = HashMap::new();
+            let mut buffered_tce: Vec<bazel_event::TargetCompletedEvt> = Vec::default();
+
             while let Ok(action) = rx.recv().await {
                 match action {
                     BuildEventAction::BuildCompleted => {
@@ -105,35 +150,35 @@ impl HydratedInfo {
                             named_set_of_files,
                         } => {
                             named_set_of_files_lookup.insert(id, named_set_of_files);
+
+                            let tmp_v: Vec<bazel_event::TargetCompletedEvt> =
+                                buffered_tce.drain(..).collect();
+                            for tce in tmp_v.into_iter() {
+                                if let Some(target_complete_info) = tce_event(
+                                    tce,
+                                    &rule_kind_lookup,
+                                    &named_set_of_files_lookup,
+                                    &mut buffered_tce,
+                                ) {
+                                    tx.send(Some(HydratedInfo::TargetComplete(
+                                        target_complete_info,
+                                    )))
+                                    .await
+                                    .unwrap();
+                                }
+                            }
                         }
                         bazel_event::Evt::TargetCompleted(tce) => {
-                            let mut output_files = Vec::default();
-                            if let Some(output_grp) = &tce
-                                .output_groups
-                                .iter()
-                                .filter(|grp| grp.name == "default")
-                                .next()
-                            {
-                                recursive_lookup(
-                                    &named_set_of_files_lookup,
-                                    &mut output_files,
-                                    output_grp
-                                        .file_sets
-                                        .iter()
-                                        .map(|fs| fs.id.clone())
-                                        .collect(),
-                                );
+                            if let Some(target_complete_info) = tce_event(
+                                tce,
+                                &rule_kind_lookup,
+                                &named_set_of_files_lookup,
+                                &mut buffered_tce,
+                            ) {
+                                tx.send(Some(HydratedInfo::TargetComplete(target_complete_info)))
+                                    .await
+                                    .unwrap();
                             }
-
-                            let target_complete_info = TargetCompleteInfo {
-                                output_files: output_files,
-                                target_kind: rule_kind_lookup.get(&tce.label).map(|e| e.clone()),
-                                label: tce.label,
-                                success: tce.success,
-                            };
-                            tx.send(Some(HydratedInfo::TargetComplete(target_complete_info)))
-                                .await
-                                .unwrap();
                         }
 
                         bazel_event::Evt::ActionCompleted(ace) => {

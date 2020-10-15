@@ -222,10 +222,9 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
 
                     // otherwise... add the dependency with buildozer here
                     // then add it ot the local seen dependencies
-                    log::info!(
+                    info!(
                         "Buildozer action: add dependency {:?} to {:?}",
-                        target_name,
-                        action_failed_error_info.label
+                        target_name, action_failed_error_info.label
                     );
                     buildozer
                         .add_dependency(&action_failed_error_info.label, &target_name)
@@ -274,7 +273,10 @@ mod tests {
 
         assert_eq!(
             get_candidates_for_class_name(&error_info, "com.example.bar.Baz", &index_table),
-            vec![]
+            vec![
+                (0, String::from("//src/main/scala/com/example/bar:bar")),
+                (0, String::from("//src/main/java/com/example/bar:bar")),
+            ]
         );
 
         assert_eq!(
