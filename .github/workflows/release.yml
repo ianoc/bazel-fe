@@ -16,7 +16,7 @@ jobs:
             artifact: bazelfe-macos
           - os: ubuntu-latest
             platform: linux
-            artifact: bazelfe-macos
+            artifact: bazelfe-linux
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -63,4 +63,8 @@ jobs:
             downloads/bazel-runner-macos.sha256
             downloads/bazel-runner-linux
             downloads/bazel-runner-linux.sha256
+            downloads/jvm-indexer-macos
+            downloads/jvm-indexer-macos.sha256
+            downloads/jvm-indexer-linux
+            downloads/jvm-indexer-linux.sha256
         id: "automatic_releases"
