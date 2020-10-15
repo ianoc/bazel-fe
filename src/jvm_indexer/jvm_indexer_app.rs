@@ -383,7 +383,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (k, mut innerv) in res_vec.into_iter() {
         file.write_all(k.as_bytes())?;
         file.write_all("\t".as_bytes())?;
-        innerv.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        // reverse sort
+        innerv.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         let mut idx = 0;
         for (cnt, v) in innerv.into_iter() {
             if idx > 0 {
@@ -392,7 +393,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             file.write_all(format!("{}:{}", cnt, v).as_bytes()).unwrap();
             idx += 1;
         }
-        file.write_all("\n".as_bytes());
+        file.write_all("\n".as_bytes()).unwrap();
     }
 
     Ok(())

@@ -10,7 +10,9 @@ BINARY=$3
 
 GENERATED_SHA_256=$(shasum -a 256 $BINARY | awk '{print $1}')
 
-mkdir $OUTPUT_PATH
+if [ !-d $OUTPUT_PATH ]; then 
+    mkdir $OUTPUT_PATH
+fi
 
 mv $BINARY $OUTPUT_PATH/${ARTIFACT_NAME}
 echo $GENERATED_SHA_256 > $OUTPUT_PATH/${ARTIFACT_NAME}.sha256

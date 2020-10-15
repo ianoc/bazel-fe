@@ -3,9 +3,10 @@ use std::{path::PathBuf, sync::Arc};
 use crate::build_events::hydrated_stream;
 
 use super::super::index_table;
-use crate::buildozer_driver::Buildozer;
 use crate::protos::*;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
@@ -97,25 +98,17 @@ impl IndexerActionEventStream {
                                                             .unwrap()
                                                             .into();
                                                         let extracted_zip = crate::zip_parse::extract_classes_from_zip(u);
-                                                        for file_name in extracted_zip.into_iter() {
-                                                            if let Some(without_suffix) =
-                                                                file_name.strip_suffix(".class")
-                                                            {
-                                                                let e = without_suffix
-                                                                    .replace("/", ".")
-                                                                    .replace("$", ".");
-
-                                                                found_classes.push(
-                                                                    e.strip_suffix(".")
-                                                                        .unwrap_or(&e)
-                                                                        .to_string(),
-                                                                );
-                                                            }
-                                                        }
+                                                        found_classes.extend(
+                                                            transform_file_names_into_class_names(
+                                                                extracted_zip,
+                                                            ),
+                                                        );
                                                     }
                                                 }
                                             }
                                             tx.send(Some(found_classes.len())).await.unwrap();
+                                            found_classes.sort();
+                                            found_classes.dedup();
                                             results_map.insert(tce.label, found_classes);
                                         }
                                     }
@@ -143,5 +136,72 @@ impl IndexerActionEventStream {
             }
         });
         next_rx
+    }
+}
+
+fn remove_from<'a>(haystack: &'a str, needle: &str) -> &'a str {
+    match haystack.find(needle) {
+        None => haystack,
+        Some(pos) => &haystack[0..pos],
+    }
+}
+fn transform_file_names_into_class_names(class_names: Vec<String>) -> Vec<String> {
+    lazy_static! {
+        static ref SUFFIX_ANON_CLAZZES: Regex = Regex::new(r"(\$\d*)?\.class$").unwrap();
+    }
+
+    let mut vec: Vec<String> = class_names
+        .into_iter()
+        .filter_map(|e| {
+            if (e.ends_with(".class")) {
+                Some(remove_from(&SUFFIX_ANON_CLAZZES.replace(&e, ""), "$$").to_string())
+            } else {
+                None
+            }
+        })
+        .map(|e| e.replace("$", ".").replace("/", "."))
+        .collect();
+    vec.sort();
+    vec.dedup();
+    vec
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_file_name_to_class_name() {
+        let sample_inputs = vec![
+            "scala/reflect/internal/SymbolPairs$Cursor$$anon$1.class",
+            "scala/reflect/internal/SymbolPairs$Cursor$$anon$2.class",
+            "scala/reflect/internal/SymbolPairs$Cursor$$anonfun$init$2$$anonfun$apply$1.class",
+            "scala/reflect/internal/SymbolPairs$Cursor$$anonfun$init$2$$anonfun$apply$2.class",
+            "scala/reflect/internal/ReificationSupport$ReificationSupportImpl$UnMkTemplate$$anonfun$ctorArgsCorrespondToFields$1$1.class",
+            "scala/reflect/internal/Depth$.class",
+            "scala/reflect/internal/Depth.class",
+            "com/android/aapt/Resources$AllowNew$1.class",
+            "com/android/aapt/Resources$AllowNew$Builder.class",
+            "com/android/aapt/Resources$AllowNew.class",
+            "com/android/aapt/Resources$AllowNewOrBuilder.class",
+        ];
+
+        let expected_results: Vec<String> = vec![
+            "com.android.aapt.Resources.AllowNew",
+            "com.android.aapt.Resources.AllowNew.Builder",
+            "com.android.aapt.Resources.AllowNewOrBuilder",
+            "scala.reflect.internal.Depth",
+            "scala.reflect.internal.ReificationSupport.ReificationSupportImpl.UnMkTemplate",
+            "scala.reflect.internal.SymbolPairs.Cursor",
+        ]
+        .into_iter()
+        .map(|e| e.to_string())
+        .collect();
+
+        assert_eq!(
+            transform_file_names_into_class_names(
+                sample_inputs.into_iter().map(|e| e.to_string()).collect()
+            ),
+            expected_results
+        );
     }
 }
