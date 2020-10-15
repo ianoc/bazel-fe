@@ -168,9 +168,6 @@ pub async fn process_missing_dependency_errors<T: Buildozer + Clone + Send + Syn
         .await
     }
 
-    if prefix_candidate_import_requests.len() == 0 && suffix_requests.len() == 0 {
-        return 0;
-    }
     debug!("Prefix Candidates: {:#?}", prefix_candidate_import_requests);
     #[derive(Debug, PartialEq)]
     enum Request {
