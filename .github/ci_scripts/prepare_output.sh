@@ -5,8 +5,7 @@ set -e
 
 ARTIFACT_NAME=$1
 OUTPUT_PATH=$2
-
-BINARY=target/release/bazel-runner
+BINARY=$3
 
 
 GENERATED_SHA_256=$(shasum -a 256 $BINARY | awk '{print $1}')

@@ -40,6 +40,14 @@ pub struct ActionSuccessInfo {
     pub target_kind: Option<String>,
 }
 
+#[derive(Clone, PartialEq, Debug)]
+pub struct TargetCompleteInfo {
+    pub label: String,
+    pub success: bool,
+    pub target_kind: Option<String>,
+    pub output_files: Vec<build_event_stream::file::File>,
+}
+
 // Broad strokes of the failure occured inside an action (most common)
 // or at a bazel abort, things like mis-configured build files
 #[derive(Clone, PartialEq, Debug)]
@@ -48,6 +56,26 @@ pub enum HydratedInfo {
     ActionFailed(ActionFailedErrorInfo),
     Progress(bazel_event::ProgressEvt),
     ActionSuccess(ActionSuccessInfo),
+    TargetComplete(TargetCompleteInfo),
+}
+
+fn recursive_lookup(
+    lut: &HashMap<String, build_event_stream::NamedSetOfFiles>,
+    results: &mut Vec<build_event_stream::file::File>,
+    mut ids: Vec<String>,
+) {
+    while !ids.is_empty() {
+        if let Some(head) = ids.pop() {
+            if let Some(r) = lut.get(&head) {
+                results.extend(
+                    r.files
+                        .iter()
+                        .flat_map(|e| e.file.as_ref().map(|e| e.clone())),
+                );
+                ids.extend(r.file_sets.iter().map(|e| e.id.clone()));
+            }
+        }
+    }
 }
 
 impl HydratedInfo {
@@ -58,6 +86,7 @@ impl HydratedInfo {
 
         tokio::spawn(async move {
             let mut rule_kind_lookup = HashMap::new();
+            let mut named_set_of_files_lookup = HashMap::new();
             while let Ok(action) = rx.recv().await {
                 match action {
                     BuildEventAction::BuildCompleted => {
@@ -70,6 +99,43 @@ impl HydratedInfo {
                         bazel_event::Evt::TargetConfigured(tgt_cfg) => {
                             rule_kind_lookup.insert(tgt_cfg.label, tgt_cfg.rule_kind);
                         }
+
+                        bazel_event::Evt::NamedSetOfFiles {
+                            id,
+                            named_set_of_files,
+                        } => {
+                            named_set_of_files_lookup.insert(id, named_set_of_files);
+                        }
+                        bazel_event::Evt::TargetCompleted(tce) => {
+                            let mut output_files = Vec::default();
+                            if let Some(output_grp) = &tce
+                                .output_groups
+                                .iter()
+                                .filter(|grp| grp.name == "default")
+                                .next()
+                            {
+                                recursive_lookup(
+                                    &named_set_of_files_lookup,
+                                    &mut output_files,
+                                    output_grp
+                                        .file_sets
+                                        .iter()
+                                        .map(|fs| fs.id.clone())
+                                        .collect(),
+                                );
+                            }
+
+                            let target_complete_info = TargetCompleteInfo {
+                                output_files: output_files,
+                                target_kind: rule_kind_lookup.get(&tce.label).map(|e| e.clone()),
+                                label: tce.label,
+                                success: tce.success,
+                            };
+                            tx.send(Some(HydratedInfo::TargetComplete(target_complete_info)))
+                                .await
+                                .unwrap();
+                        }
+
                         bazel_event::Evt::ActionCompleted(ace) => {
                             if !ace.success {
                                 let err_info = ActionFailedErrorInfo {
@@ -87,7 +153,6 @@ impl HydratedInfo {
                                     .await
                                     .unwrap();
                             } else {
-                                println!("{:#?}", ace);
                                 let act_info = ActionSuccessInfo {
                                     stdout: ace.stdout,
                                     stderr: ace.stderr,

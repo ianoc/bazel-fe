@@ -142,6 +142,55 @@ pub mod bazel_event {
                             })
                         };
 
+                        let named_set_of_files: Option<Evt> = {
+                            let fileset_id =
+                                v.id.as_ref()
+                                    .and_then(|e| e.id.as_ref())
+                                    .and_then(|e| match e {
+                                        build_event_stream::build_event_id::Id::NamedSet(
+                                            fileset_id,
+                                        ) => Some(fileset_id.id.clone()),
+                                        _ => None,
+                                    });
+
+                            fileset_id.and_then(|id| {
+                                v.payload.as_ref().and_then(|e| match e {
+                                    build_event_stream::build_event::Payload::NamedSetOfFiles(
+                                        named_set_of_files,
+                                    ) => Some(Evt::NamedSetOfFiles {
+                                        id: id,
+                                        named_set_of_files: named_set_of_files.clone(),
+                                    }),
+                                    _ => None,
+                                })
+                            })
+                        };
+
+                        let target_complete: Option<Evt> = {
+                            let target_label_opt =
+                                v.id.as_ref()
+                                    .and_then(|e| e.id.as_ref())
+                                    .and_then(|e| match e {
+                                        build_event_stream::build_event_id::Id::TargetCompleted(
+                                            target_completed_id,
+                                        ) => Some(target_completed_id.label.clone()),
+                                        _ => None,
+                                    });
+
+                            target_label_opt.and_then(|label| {
+                                v.payload.as_ref().and_then(|e| match e {
+                                    build_event_stream::build_event::Payload::Completed(
+                                        target_completed,
+                                    ) => Some(Evt::TargetCompleted(TargetCompletedEvt {
+                                        success: target_completed.success,
+                                        label: label,
+                                        output_groups: target_completed.output_group.clone(),
+                                    })),
+                                    _ => None,
+                                })
+                            })
+                        };
+
                         let test_outputs: Option<Evt> = {
                             let failed_file_data: Option<Vec<build_event_stream::file::File>> =
                                 v.payload.as_ref().and_then(|e| match e {
@@ -180,7 +229,11 @@ pub mod bazel_event {
                             Evt::TargetConfigured(e)
                         } else if let Some(e) = action_info {
                             e
+                        } else if let Some(e) = target_complete {
+                            e
                         } else if let Some(e) = test_outputs {
+                            e
+                        } else if let Some(e) = named_set_of_files {
                             e
                         } else if let Some(e) = aborted {
                             e
@@ -226,10 +279,16 @@ pub mod bazel_event {
         pub failed_files: Vec<build_event_stream::file::File>,
     }
     #[derive(Clone, PartialEq, Debug)]
-
     pub struct TargetConfiguredEvt {
         pub label: String,
         pub rule_kind: String,
+    }
+
+    #[derive(Clone, PartialEq, Debug)]
+    pub struct TargetCompletedEvt {
+        pub label: String,
+        pub success: bool,
+        pub output_groups: Vec<build_event_stream::OutputGroup>,
     }
     #[derive(Clone, PartialEq, Debug)]
     pub enum Evt {
@@ -239,6 +298,11 @@ pub mod bazel_event {
         TestFailure(TestFailureEvt),
         Progress(ProgressEvt),
         Aborted(AbortedEvt),
+        TargetCompleted(TargetCompletedEvt),
+        NamedSetOfFiles {
+            id: String,
+            named_set_of_files: build_event_stream::NamedSetOfFiles,
+        },
         UnknownEvent(String),
     }
 }
@@ -542,42 +606,15 @@ mod tests {
                 );
 
                 bazel_event::BazelBuildEvent {
-                    event: bazel_event::Evt::BazelEvent(BuildEvent {
-                        id: Some(BuildEventId {
-                            id: Some(build_event_id::Id::TargetCompleted(TargetCompletedId {
-                                label: label_name,
-                                configuration: Some(ConfigurationId { id: id_value }),
-                                aspect: String::from(""),
-                            })),
-                        }),
-                        children: vec![],
-                        last_message: false,
-                        payload: Some(build_event::Payload::Completed(TargetComplete {
-                            success: true,
-                            target_kind: String::from(""),
-                            test_size: 0,
-                            output_group: vec![OutputGroup {
-                                name: String::from("default"),
-                                file_sets: vec![NamedSetOfFilesId {
-                                    id: String::from("16"),
-                                }],
+                    event: bazel_event::Evt::TargetCompleted(bazel_event::TargetCompletedEvt {
+                        label: label_name,
+                        success: true,
+                        output_groups: vec![OutputGroup {
+                            name: String::from("default"),
+                            file_sets: vec![NamedSetOfFilesId {
+                                id: String::from("16"),
                             }],
-                            important_output: vec![File {
-                                path_prefix: vec![
-                                    String::from("bazel-out"),
-                                    String::from("darwin-fastbuild"),
-                                    String::from("bin"),
-                                ],
-                                name: String::from(
-                                    "src/scala/com/github/johnynek/bazel_deps/settings_loader.jar",
-                                ),
-                                file: Some(build_event_stream::file::File::Uri(path1)),
-                            }],
-                            directory_output: vec![],
-                            tag: vec![],
-                            test_timeout_seconds: 0,
-                            failure_detail: None,
-                        })),
+                        }],
                     }),
                 }
             };

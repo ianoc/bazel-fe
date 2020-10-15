@@ -13,6 +13,8 @@ use std::sync::atomic::Ordering;
 use tonic::transport::Server;
 
 use bazelfe::protos::*;
+use std::fs::File;
+use std::io::prelude::*;
 
 use bazelfe::bazel_runner;
 use bazelfe::build_events::build_event_server::bazel_event;
@@ -20,6 +22,7 @@ use bazelfe::build_events::build_event_server::BuildEventAction;
 use bazelfe::build_events::hydrated_stream::HydratedInfo;
 use bazelfe::buildozer_driver;
 use bazelfe::jvm_indexer::bazel_query::BazelQuery;
+use dashmap::{DashMap, DashSet};
 use google::devtools::build::v1::publish_build_event_server::PublishBuildEventServer;
 use rand::Rng;
 use std::io::Write;
@@ -45,23 +48,7 @@ struct Opt {
     extra_allowed_rule_kinds: Option<Vec<String>>,
 }
 
-fn build_rule_queries(
-    extra_allowed_rule_kinds: Option<Vec<String>>,
-    target_roots: &Vec<String>,
-) -> Vec<String> {
-    let allowed_rule_kinds: Vec<String> = vec![
-        "java_library",
-        "scala_library",
-        "scala_proto_library",
-        "scala_macro_library",
-        "java_proto_library",
-        "_java_grpc_library",
-    ]
-    .into_iter()
-    .map(|e| e.to_string())
-    .chain(extra_allowed_rule_kinds.unwrap_or_default().into_iter())
-    .collect();
-
+fn build_rule_queries(allowed_rule_kinds: &Vec<String>, target_roots: &Vec<String>) -> Vec<String> {
     let mut result = Vec::default();
     for target_root in target_roots {
         for allowed_kind in allowed_rule_kinds.iter() {
@@ -77,7 +64,8 @@ async fn spawn_bazel_attempt(
     aes: &bazelfe::jvm_indexer::indexer_action_event_stream::IndexerActionEventStream,
     bes_port: u16,
     bazel_args: &Vec<String>,
-) -> (u32, bazel_runner::ExecuteResult) {
+    index_map: Arc<DashMap<String, Vec<String>>>,
+) -> (usize, bazel_runner::ExecuteResult) {
     let (tx, rx) = broadcast::channel(8192);
     let _ = {
         let mut locked = sender_arc.lock().await;
@@ -85,10 +73,10 @@ async fn spawn_bazel_attempt(
     };
     let error_stream = HydratedInfo::build_transformer(rx);
 
-    let mut target_extracted_stream = aes.build_action_pipeline(error_stream);
+    let mut target_extracted_stream = aes.build_action_pipeline(error_stream, index_map);
 
-    let actions_completed: Arc<std::sync::atomic::AtomicU32> =
-        Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let actions_completed: Arc<std::sync::atomic::AtomicUsize> =
+        Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let recv_ver = Arc::clone(&actions_completed);
     let recv_task = tokio::spawn(async move {
@@ -152,6 +140,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     builder.init();
     let bazel_binary_path: String = (&opt.bazel_binary_path.to_str().unwrap()).to_string();
 
+    let allowed_rule_kinds: Vec<String> = vec![
+        "java_library",
+        "scala_library",
+        "scala_proto_library",
+        "scala_macro_library",
+        "java_proto_library",
+        "_java_grpc_library",
+    ]
+    .into_iter()
+    .map(|e| e.to_string())
+    .chain(opt.extra_allowed_rule_kinds.unwrap_or_default().into_iter())
+    .collect();
+
     info!("Executing initial query to find all external repos in this bazel repository");
     let bazel_query = bazelfe::jvm_indexer::bazel_query::from_binary_path(opt.bazel_binary_path);
 
@@ -193,7 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("We have identified {} target roots", target_roots.len());
     }
 
-    let all_queries = build_rule_queries(opt.extra_allowed_rule_kinds, &target_roots);
+    let all_queries = build_rule_queries(&allowed_rule_kinds, &target_roots);
 
     let query_rule_attr_batch_size: usize = 2000;
     info!("Extracting targets with an allowed rule kind, gives rise to {} total queries, we will union them to bazel in batches of size: {}", all_queries.len(), query_rule_attr_batch_size);
@@ -239,7 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         processed_count += chunk.len();
         info!(
-            "After {} query batches, found {} matching targets",
+            "After {} queries, found {} matching targets",
             processed_count,
             all_targets_to_use.values().fold(0, |acc, e| acc + e.len())
         );
@@ -253,7 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let aes = bazelfe::jvm_indexer::indexer_action_event_stream::IndexerActionEventStream::new(
-        opt.index_output_location,
+        allowed_rule_kinds,
     );
 
     let default_port = {
@@ -269,7 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .expect("can't parse BIND_ADDRESS variable");
 
-    info!("Services listening on {}", addr);
+    debug!("Services listening on {}", addr);
 
     let (bes, sender_arc, _) =
         bazelfe::build_events::build_event_server::build_bazel_build_events_service();
@@ -290,6 +291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         compile_batch_size
     );
 
+    let results_map: Arc<DashMap<String, Vec<String>>> = Arc::new(DashMap::new());
     async fn run_bazel(
         bes_port: u16,
         sender_arc: Arc<
@@ -299,6 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         aes: &bazelfe::jvm_indexer::indexer_action_event_stream::IndexerActionEventStream,
         batch_idx: usize,
         chunk: &mut Vec<String>,
+        results_map: Arc<DashMap<String, Vec<String>>>,
     ) {
         let batch_idx = batch_idx;
         let batch_start_time = Instant::now();
@@ -309,7 +312,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ];
         current_args.extend(chunk.drain(..));
         let (_num_classes_found, bazel_result) =
-            spawn_bazel_attempt(&sender_arc, &aes, bes_port, &current_args).await;
+            spawn_bazel_attempt(&sender_arc, &aes, bes_port, &current_args, results_map).await;
         info!(
             "Batch {} had exit code: {} after {} seconds",
             batch_idx,
@@ -333,6 +336,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &aes,
                 batch_idx,
                 &mut batch_elements,
+                Arc::clone(&results_map),
             )
             .await;
             batch_idx += 1;
@@ -346,8 +350,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &aes,
         batch_idx,
         &mut batch_elements,
+        Arc::clone(&results_map),
     )
     .await;
+
+    info!("Building a target popularity map");
+    let ret = bazelfe::jvm_indexer::popularity_parser::build_popularity_map();
+
+    let mut reverse_hashmap = HashMap::new();
+
+    info!("Building results map, and injecting popularity data");
+    for kv in results_map.iter() {
+        let key = kv.key();
+        let value = kv.value();
+        let freq: usize = ret.get(key).unwrap_or(&0).clone();
+        for inner_v in value {
+            let v = reverse_hashmap.entry(inner_v.clone()).or_insert(vec![]);
+            v.push((freq, key.clone()))
+        }
+    }
+
+    let res_vec = {
+        let mut v1: Vec<(String, Vec<(usize, String)>)> = reverse_hashmap.into_iter().collect();
+
+        v1.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        v1
+    };
+
+    info!("Writing out index data");
+    let mut file = std::fs::File::create(&opt.index_output_location).unwrap();
+
+    for (k, mut innerv) in res_vec.into_iter() {
+        file.write_all(k.as_bytes())?;
+        file.write_all("\t".as_bytes())?;
+        innerv.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut idx = 0;
+        for (cnt, v) in innerv.into_iter() {
+            if idx > 0 {
+                file.write_all(",".as_bytes()).unwrap();
+            }
+            file.write_all(format!("{}:{}", cnt, v).as_bytes()).unwrap();
+            idx += 1;
+        }
+        file.write_all("\n".as_bytes());
+    }
 
     Ok(())
 }

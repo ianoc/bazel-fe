@@ -121,6 +121,9 @@ where
                                         tx.send(Some(actions_completed)).await.unwrap();
                                     }
                                 }
+                                hydrated_stream::HydratedInfo::TargetComplete(tce) => {
+                                    println!("tce: {:#?}", tce);
+                                }
                                 hydrated_stream::HydratedInfo::ActionSuccess(_) => (),
                                 hydrated_stream::HydratedInfo::Progress(progress_info) => {
                                     let tbl = Arc::clone(&self_d.previous_global_seen);

@@ -16,3 +16,4 @@ pub mod source_dependencies;
 pub mod tokioext;
 pub mod ui;
 pub mod util;
+pub mod zip_parse;

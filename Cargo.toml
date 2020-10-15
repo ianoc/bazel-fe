@@ -3,6 +3,7 @@ name = "bazel-fe"
 version = "0.1.0"
 authors = ["Ian O'Connell <ianoc@ianoc.net>"]
 edition = "2018"
+license = "Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -30,12 +31,15 @@ async-trait = "0.1.41"
 env_logger = "0.7.1"
 dashmap = "3.11.10"
 exec = "0.3.1"
+zip = "0.5.8"
 
 [dev-dependencies]
 tempfile = "3.1.0"
 pinky-swear = "4.0.0"
 tower = "0.3"
 
+[features]
+dev-binaries=[]
 
 [build-dependencies]
 tonic-build = { version = "0.2.0", features = ["prost"] }
@@ -49,28 +53,30 @@ path = "src/lib.rs"
 [[bin]]
 name = "bazel-fe-bin"
 path = "src/bin.rs"
+required-features = ["dev-binaries"]
 
 
 [[bin]]
 name = "scala-parser"
 path = "src/source_dependencies/scala/scala_parser_app.rs"
-
+required-features = ["dev-binaries"]
 
 [[bin]]
 name = "java-parser"
 path = "src/source_dependencies/java/java_parser_app.rs"
-
+required-features = ["dev-binaries"]
 
 
 [[bin]]
 name = "index-table"
 path = "src/index_table/load_index_table_app.rs"
-
+required-features = ["dev-binaries"]
 
 
 [[bin]]
 name = "build-events"
 path = "src/build_events/build_events_app.rs"
+required-features = ["dev-binaries"]
 
 [[bin]]
 name = "bazel-runner"
@@ -80,8 +86,14 @@ path = "src/bazel_runner/bazel_runner_app.rs"
 [[bin]]
 name = "buildozer-driver"
 path = "src/buildozer_driver/buildozer_driver_app.rs"
+required-features = ["dev-binaries"]
 
 [[bin]]
 name = "jvm-indexer"
 path = "src/jvm_indexer/jvm_indexer_app.rs"
+
+[[bin]]
+name = "popularity-parser-app"
+path = "src/jvm_indexer/popularity_parser_app.rs"
+required-features = ["dev-binaries"]
 
