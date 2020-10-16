@@ -30,21 +30,31 @@ use tokio::sync::{broadcast, Mutex};
 #[derive(Clap, Debug)]
 #[clap(name = "basic")]
 struct Opt {
+    /// Optional if you have some restrictions/needs where the server bazel will connect to should bind
+    /// default to a random port on 127.0.0.1
     #[clap(long, env = "BIND_ADDRESS")]
     bind_address: Option<String>,
 
+    /// Where to find the bazel to invoke, if its just on your path `which bazel` could be passed here.
     #[clap(long, parse(from_os_str))]
     bazel_binary_path: PathBuf,
 
+    /// Where the output index should be stored
     #[clap(long, env = "INDEX_OUTPUT_LOCATION", parse(from_os_str))]
     index_output_location: PathBuf,
 
+    /// Paths to ignore for dependencies, a good value here when working with scala code is `io_bazel_rules_scala`
     #[clap(long)]
     blacklist_remote_roots: Vec<String>,
 
+    /// Extra rules other than the default java,scala,java proto, scala proto rules to allow jars from
     #[clap(long)]
     extra_allowed_rule_kinds: Option<Vec<String>>,
 
+    /// An optional bazel deps root, something like `@third_party_jvm`
+    /// when present we will use this root to try calculate the mapping of a bazel deps
+    /// to underlying raw jar. Then apply that reverse mapping so missing dependencies/the index built
+    /// will use the bazel deps entry rather than the raw jar.
     #[clap(long)]
     bazel_deps_root: Option<String>,
 }
